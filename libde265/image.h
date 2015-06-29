@@ -111,6 +111,15 @@ template <class DataUnit> class MetaDataArray
     if (data && src->data_size == data_size) memcpy(data, src->data, data_size * sizeof(DataUnit));
   }
 
+  /// Copy the size information from source but only get the data pointer.
+  void copy_pointer(const MetaDataArray *src) {
+    data = src->data;
+    data_size = src->data_size;
+    log2unitSize = src->log2unitSize;
+    width_in_units = src->width_in_units;
+    height_in_units = src->height_in_units;
+  }
+
   const DataUnit& get(int x,int y) const {
     int unitX = x>>log2unitSize;
     int unitY = y>>log2unitSize;
@@ -353,7 +362,8 @@ private:
 
   /// Multilayer extension
 public:
-  bool is_inter_layer_reference_picture() { return bIlRefPic; }
+        bool is_inter_layer_reference_picture()       { return bIlRefPic; }
+  const bool is_inter_layer_reference_picture() const { return bIlRefPic; }
 
   // Copy the metadata from the src image (SNR scalabililty)
   void copy_metadata(const de265_image* src);
@@ -361,10 +371,14 @@ public:
   void set_inter_layer_metadata_scaling_parameters( int scaling_parameters[10] );
   // Upsample metadata from the source image. Make sure to set_inter_layer_metadata_scaling_parameters first 
   void upsample_metadata(const de265_image* src);
-  // Set if upsampling has to be performed
+  // Set/get if upsampling has to be performed
   void setEqualPictureSizeAndOffsetFlag(bool f) { equalPictureSizeAndOffsetFlag = f; }
+  bool getEqualPictureSizeAndOffsetFlag()       { return equalPictureSizeAndOffsetFlag; }
+  const bool getEqualPictureSizeAndOffsetFlag() const { return equalPictureSizeAndOffsetFlag; }
   // Upsample the image from the source using the given upsampling parameters
   void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
+  // Get pointers to the reconstruction pixel data and metadata from the source
+  void get_pointers_from(de265_image *src);
   // The colour mapping process as specified in clause H.8.1.4.3 is invoked
   void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
 

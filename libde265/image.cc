@@ -314,6 +314,10 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
   bpp_shift[1] = (sps->BitDepth_C > 8) ? 1 : 0;
   bpp_shift[2] = bpp_shift[1];
 
+  if (interLayerReferencePicture) {
+    // Do not allocate an actual picture or metadata.
+    return DE265_OK;
+  }
 
   // allocate memory and set conformance window pointers
 
@@ -366,22 +370,20 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
   // --- allocate decoding info arrays ---
 
   if (allocMetadata) {
-    if (!interLayerReferencePicture) {
-      // For inter layer reference pictures only allocate cb_info and pb_info
+    // For inter layer reference pictures only allocate cb_info and pb_info
       
-      // intra pred mode
-      mem_alloc_success &= intraPredMode.alloc(sps->PicWidthInMinPUs, sps->PicHeightInMinPUs,
-                                               sps->Log2MinPUSize);
+    // intra pred mode
+    mem_alloc_success &= intraPredMode.alloc(sps->PicWidthInMinPUs, sps->PicHeightInMinPUs,
+                                              sps->Log2MinPUSize);
 
-      // tu info
-      mem_alloc_success &= tu_info.alloc(sps->PicWidthInTbsY, sps->PicHeightInTbsY,
-                                          sps->Log2MinTrafoSize);
+    // tu info
+    mem_alloc_success &= tu_info.alloc(sps->PicWidthInTbsY, sps->PicHeightInTbsY,
+                                        sps->Log2MinTrafoSize);
 
-      // deblk info
-      int deblk_w = (sps->pic_width_in_luma_samples +3)/4;
-      int deblk_h = (sps->pic_height_in_luma_samples+3)/4;
-      mem_alloc_success &= deblk_info.alloc(deblk_w, deblk_h, 2);
-    }
+    // deblk info
+    int deblk_w = (sps->pic_width_in_luma_samples +3)/4;
+    int deblk_h = (sps->pic_height_in_luma_samples+3)/4;
+    mem_alloc_success &= deblk_info.alloc(deblk_w, deblk_h, 2);
     
     // cb info
     mem_alloc_success &= cb_info.alloc(sps->PicWidthInMinCbsY, sps->PicHeightInMinCbsY,
@@ -687,6 +689,33 @@ void de265_image::copy_lines_from(const de265_image* src, int first, int end)
                src->chroma_width * chroma_bpp);
       }
     }
+  }
+}
+
+void de265_image::get_pointers_from(de265_image *src)
+{
+  if (width != src->get_width() || height != src->get_height()) {
+    assert( false );
+  }
+  assert( bIlRefPic );
+
+  // Pixel data
+  pixels[0] = src->pixels[0];
+  pixels[1] = src->pixels[1];
+  pixels[2] = src->pixels[2];
+
+  // Metadata
+  cb_info.copy_pointer(&src->cb_info);
+  pb_info.copy_pointer(&src->pb_info);
+
+  // Save pointer to lower layer reference
+  ilRefPic = src;
+
+  // Copy the pointers to the slice segment headers.
+  // TODO: Is this a good idea?
+  slices.clear();
+  for (int i = 0; i < src->slices.size(); i++) {
+    slices.push_back(src->slices.at(i));
   }
 }
 

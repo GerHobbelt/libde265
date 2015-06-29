@@ -357,39 +357,45 @@ void generate_inter_prediction_samples(base_context* ctx,
           // It is bitstream conformance that inter layer prediction may only be performed
           // with a zero motion vector. We can still perform this but something might have
           // gone wrong.
-          ctx->add_warning(DE265_WARNING_MULTILAYER_NON_ZERO_MV_FOR_INTER_LAYER_PREDICTION, false);
+          ctx->add_warning(DE265_WARNING_MULTILAYER_NON_ZERO_MV_FOR_INTER_LAYER_PREDICTION, false); 
         }
 
-        // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
+        if (refPic->is_inter_layer_reference_picture() && !refPic->getEqualPictureSizeAndOffsetFlag()) {
+          // The reference picture is an inter layer picture and has to be upsampled.
 
-        if (img->high_bit_depth(0)) {
-          mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                  predSamplesL[l],nCS,
-                  (const uint16_t*)refPic->get_image_plane(0),
-                  refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
         }
         else {
-          mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                  predSamplesL[l],nCS,
-                  (const uint8_t*)refPic->get_image_plane(0),
-                  refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
-        }
+          // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
 
-        if (img->high_bit_depth(0)) {
-          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
-                    refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
-                    refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-        }
-        else {
-          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
-                    refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
-                    refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+          if (img->high_bit_depth(0)) {
+            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesL[l],nCS,
+                    (const uint16_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+          else {
+            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesL[l],nCS,
+                    (const uint8_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+
+          if (img->high_bit_depth(0)) {
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+          }
+          else {
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+          }
         }
       }
     }

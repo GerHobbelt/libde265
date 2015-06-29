@@ -1644,10 +1644,11 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
   }
 
   if (ilRefPic[ilRefPicIdx] == NULL) {
-    // Create a new inter layer picture buffer if not allocated yet.
+    // Create a new inter layer picture buffer.
+    // No memory for pixel/metadata will be allocated for this picture.
     ilRefPic[ilRefPicIdx] = new de265_image();
     de265_chroma c = rlPic->get_chroma_format();
-    ilRefPic[ilRefPicIdx]->alloc_image(PicWidthInSamplesCurrY, PicHeightInSamplesCurrY, c, sps, true, ctx, NULL, 0, 0, false, true);
+    ilRefPic[ilRefPicIdx]->alloc_image(PicWidthInSamplesCurrY, PicHeightInSamplesCurrY, c, sps, false, ctx, NULL, 0, 0, false, true);
   }
   ilRefPic[ilRefPicIdx]->PicOrderCntVal = rlPic->PicOrderCntVal;          // Copy POC
   ilRefPic[ilRefPicIdx]->setEqualPictureSizeAndOffsetFlag ( equalPictureSizeAndOffsetFlag );
@@ -1662,8 +1663,9 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
     // Equal picture sizes, equal bit depths, no cropping.
     // SNR scalability. We do not need to perform any upsampling.
     // Just copy all information from the lower layer reference.
-    ilRefPic[ilRefPicIdx]->copy_lines_from(rlPic, 0, rlPic->get_height());  // Copy pixel data
-    ilRefPic[ilRefPicIdx]->copy_metadata(rlPic);                            // Copy metadata
+    //ilRefPic[ilRefPicIdx]->copy_lines_from(rlPic, 0, rlPic->get_height());  // Copy pixel data
+    //ilRefPic[ilRefPicIdx]->copy_metadata(rlPic);                            // Copy metadata
+    ilRefPic[ilRefPicIdx]->get_pointers_from(rlPic);
   }
   else {
     // Something (resolution, bitdepth, aspect ratio) between the layers is different.
