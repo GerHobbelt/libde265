@@ -703,7 +703,14 @@ void de265_image::get_pointers_from(de265_image *src)
   pixels[0] = src->pixels[0];
   pixels[1] = src->pixels[1];
   pixels[2] = src->pixels[2];
-
+  // Conformance windows pixels data
+  pixels_confwin[0] = src->pixels_confwin[0];
+  pixels_confwin[1] = src->pixels_confwin[1];
+  pixels_confwin[2] = src->pixels_confwin[2];
+  // Strides
+  stride        = src->stride;
+  chroma_stride = src->chroma_stride;
+  
   // Metadata
   cb_info.copy_pointer(&src->cb_info);
   pb_info.copy_pointer(&src->pb_info);
