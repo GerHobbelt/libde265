@@ -365,8 +365,8 @@ public:
         bool is_inter_layer_reference_picture()       { return bIlRefPic; }
   const bool is_inter_layer_reference_picture() const { return bIlRefPic; }
 
-  // Copy the metadata from the src image (SNR scalabililty)
-  void copy_metadata(const de265_image* src);
+  // Copy the metadata pointers from the src image (SNR scalabililty)
+  void copy_metadata_pointers(const de265_image* src);
   // Set the parameters needed for metadata upsampling
   void set_inter_layer_metadata_scaling_parameters( int scaling_parameters[10] );
   // Upsample metadata from the source image. Make sure to set_inter_layer_metadata_scaling_parameters first 
@@ -379,6 +379,8 @@ public:
   void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
   // Get pointers to the reconstruction pixel data and metadata from the source
   void get_pointers_from(de265_image *src);
+  // Set upsampling to true and set the given upsampling parameters
+  void set_inter_layer_upsampling_parameters(int upsampling_params[2][10]);
   // The colour mapping process as specified in clause H.8.1.4.3 is invoked
   void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
 
@@ -386,6 +388,7 @@ private:
   bool bIlRefPic;
   bool equalPictureSizeAndOffsetFlag;  // Is upsampling required? (True for SNR scalability)
   int  il_scaling_parameters[10];
+  int  il_upsampling_parameters[2][10];
   // Pointer to the lower layer reference picture.
   // This is used by get_SliceHeaderIndex to retrive the header of the lower layer reference.
   const de265_image* ilRefPic;

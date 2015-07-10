@@ -497,15 +497,15 @@ de265_error de265_image::copy_image(const de265_image* src)
   return err;
 }
 
-void de265_image::copy_metadata(const de265_image* src)
+void de265_image::copy_metadata_pointers(const de265_image* src)
 {
   if (width != src->get_width() || height != src->get_height()) {
     assert( false );
   }
   assert( bIlRefPic );
   
-  cb_info.copy(&src->cb_info);
-  pb_info.copy(&src->pb_info);
+  cb_info.copy_pointer(&src->cb_info);
+  pb_info.copy_pointer(&src->pb_info);
 
   // Save pointer to lower layer reference
   ilRefPic = src;
@@ -524,6 +524,16 @@ void de265_image::set_inter_layer_metadata_scaling_parameters(int scaling_parame
     il_scaling_parameters[i] = scaling_parameters[i];
   }
 }
+
+void de265_image::set_inter_layer_upsampling_parameters(int upsampling_params[2][10])
+{
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 10; i++) {
+      il_upsampling_parameters[j][i] = upsampling_params[j][i];
+    }
+  }
+}
+
 
 /* H.8.1.4.2 Resampling process of picture motion and mode parameters
  *
