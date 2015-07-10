@@ -267,7 +267,15 @@ void mc_chroma(const base_context* ctx,
   }
 }
 
-
+template <class pixel_t>
+void upsample_luma(const base_context* ctx,
+             const seq_parameter_set* sps, 
+             int xP,int yP,
+             int16_t* out, int out_stride,
+             const pixel_t* ref, int ref_stride,
+             int nPbW, int nPbH, int bitDepth_L)
+{
+}
 
 // 8.5.3.2
 // NOTE: for full-pel shifts, we can introduce a fast path, simply copying without shifts
@@ -363,6 +371,21 @@ void generate_inter_prediction_samples(base_context* ctx,
         if (refPic->is_inter_layer_reference_picture() && !refPic->getEqualPictureSizeAndOffsetFlag()) {
           // The reference picture is an inter layer picture and has to be upsampled.
 
+          // Upsample luma
+          if (img->high_bit_depth(0)) {
+            upsample_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y,
+                    predSamplesL[l],nCS,
+                    (const uint16_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+          else {
+            upsample_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y,
+                    predSamplesL[l],nCS,
+                    (const uint8_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+
+          // Chroma
         }
         else {
           // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
