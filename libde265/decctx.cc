@@ -1665,6 +1665,7 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
     // SNR scalability. We do not need to perform any upsampling.
     // Just copy pointers to the lower layer reconstructed pixels
     ilRefPic[ilRefPicIdx]->get_pixel_pointers_from(rlPic);
+    ilRefPic[ilRefPicIdx]->setInterLayerMotionPredictionEnabled(true);
   }
   else {
     // Something (resolution, bitdepth, aspect ratio) between the layers is different.

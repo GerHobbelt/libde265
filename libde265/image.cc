@@ -507,6 +507,7 @@ void de265_image::set_lower_layer_picture(const de265_image* src)
   // Save pointer to lower layer reference
   assert( bIlRefPic );
   ilRefPic = src;
+  bIlRefPic = true;
 
   // Copy the pointers to the slice segment headers.
   // TODO: Is this a good idea?
@@ -980,6 +981,12 @@ bool de265_image::available_pred_blk(int xC,int yC, int nCbS, int xP, int yP,
 MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
 {
   assert(ilRefPic != NULL);
+
+  if (equalPictureSizeAndOffsetFlag) {
+    // No scaling necessary
+    return ilRefPic->get_mv_info(xB, yB);
+  }
+
   // Invoke the upsampling process for motion vectors 
 
   int PicWidthInSamplesRefLayerY  = ilRefPic->get_width();
@@ -1062,6 +1069,13 @@ MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
 
 PredMode de265_image::get_pred_mode_lower_layer(int xB, int yB) const
 {
+  assert(ilRefPic != NULL);
+
+  if (equalPictureSizeAndOffsetFlag) {
+    // No scaling necessary
+    return ilRefPic->get_pred_mode(xB, yB);
+  }
+
   int PicWidthInSamplesRefLayerY  = ilRefPic->get_width();
   int PicHeightInSamplesRefLayerY = ilRefPic->get_height();
 
