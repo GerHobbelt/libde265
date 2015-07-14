@@ -373,6 +373,8 @@ public:
   void setEqualPictureSizeAndOffsetFlag(bool f) { equalPictureSizeAndOffsetFlag = f; }
   bool getEqualPictureSizeAndOffsetFlag()       { return equalPictureSizeAndOffsetFlag; }
   const bool getEqualPictureSizeAndOffsetFlag() const { return equalPictureSizeAndOffsetFlag; }
+
+  const de265_image* get_il_refPic() const { return ilRefPic; };
   
   //// Upsample the image from the source using the given upsampling parameters
   //void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
