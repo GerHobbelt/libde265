@@ -111,15 +111,6 @@ template <class DataUnit> class MetaDataArray
     if (data && src->data_size == data_size) memcpy(data, src->data, data_size * sizeof(DataUnit));
   }
 
-  /// Copy the size information from source but only get the data pointer.
-  void copy_pointer(const MetaDataArray *src) {
-    data = src->data;
-    data_size = src->data_size;
-    log2unitSize = src->log2unitSize;
-    width_in_units = src->width_in_units;
-    height_in_units = src->height_in_units;
-  }
-
   const DataUnit& get(int x,int y) const {
     int unitX = x>>log2unitSize;
     int unitY = y>>log2unitSize;
@@ -365,35 +356,43 @@ public:
         bool is_inter_layer_reference_picture()       { return bIlRefPic; }
   const bool is_inter_layer_reference_picture() const { return bIlRefPic; }
 
-  // Copy the metadata pointers from the src image (SNR scalabililty)
-  void copy_metadata_pointers(const de265_image* src);
+  // Set the pointer to the lower layer reference
+  void set_lower_layer_picture(const de265_image* src);
+  // Get pointers to the reconstruction pixel data from the source
+  void get_pixel_pointers_from(de265_image *src);
+  
   // Set the parameters needed for metadata upsampling
   void set_inter_layer_metadata_scaling_parameters( int scaling_parameters[10] );
-  // Upsample metadata from the source image. Make sure to set_inter_layer_metadata_scaling_parameters first 
-  void upsample_metadata(const de265_image* src);
+  // Set the given upsampling parameters
+  void set_inter_layer_upsampling_parameters(int upsampling_params[2][10]);
+  // If set to true, the functions get_pred_mode and get_mv_info will return the upsampled lower layer metadata.
+  // Remember to set_inter_layer_metadata_scaling_parameters() and set_lower_layer_picture() first.
+  void setInterLayerMotionPredictionEnabled(bool ilPred) { interLayerMotionPredictionEnabled = ilPred; }
+
   // Set/get if upsampling has to be performed
   void setEqualPictureSizeAndOffsetFlag(bool f) { equalPictureSizeAndOffsetFlag = f; }
   bool getEqualPictureSizeAndOffsetFlag()       { return equalPictureSizeAndOffsetFlag; }
   const bool getEqualPictureSizeAndOffsetFlag() const { return equalPictureSizeAndOffsetFlag; }
-  // Upsample the image from the source using the given upsampling parameters
-  void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
-  // Get pointers to the reconstruction pixel data and metadata from the source
-  void get_pointers_from(de265_image *src);
-  // Set upsampling to true and set the given upsampling parameters
-  void set_inter_layer_upsampling_parameters(int upsampling_params[2][10]);
-  // The colour mapping process as specified in clause H.8.1.4.3 is invoked
-  void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
-
-  MotionVectorSpec get_mv_info_lower_layer(int x, int y) const;
+  
+  //// Upsample the image from the source using the given upsampling parameters
+  //void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
+  //
+    
+  //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
+  //void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
 
 private:
   bool bIlRefPic;
   bool equalPictureSizeAndOffsetFlag;  // Is upsampling required? (True for SNR scalability)
+  bool interLayerMotionPredictionEnabled;
   int  il_scaling_parameters[10];
   int  il_upsampling_parameters[2][10];
   // Pointer to the lower layer reference picture.
   // This is used by get_SliceHeaderIndex to retrive the header of the lower layer reference.
   const de265_image* ilRefPic;
+
+  MotionVectorSpec get_mv_info_lower_layer(int x, int y) const; // Get MV from lower layer
+  PredMode get_pred_mode_lower_layer(int x, int y) const;       // Get PredMode from lower layer
 
 public:
   std::vector<slice_segment_header*> slices;
@@ -516,7 +515,10 @@ public:
 
   enum PredMode get_pred_mode(int x,int y) const
   {
-    return (enum PredMode)cb_info.get(x,y).PredMode;
+    if (bIlRefPic)
+      return get_pred_mode_lower_layer(x,y);
+    else
+      return (enum PredMode)cb_info.get(x,y).PredMode;
   }
 
   uint8_t get_cu_skip_flag(int x,int y) const
@@ -858,12 +860,25 @@ public:
 
   const MotionVectorSpec get_mv_info(int x,int y) const
   {
-    //if (bIlRefPic) {
-    //  // Get mv info from lower layer image
-    //  update_mv_info_lower_layer(x,y);
-    //  return &mv_spec_upsample;
-    //}
-    //else
+    if (bIlRefPic) {
+      if (interLayerMotionPredictionEnabled)
+        // Get mv info from lower layer image
+        return get_mv_info_lower_layer(x,y);
+      else {
+        // Return invalid vector
+        MotionVectorSpec mv_dst;
+        mv_dst.mv[0].x = 0;
+        mv_dst.mv[0].y = 0;
+        mv_dst.mv[1].x = 0;
+        mv_dst.mv[1].y = 0;
+        mv_dst.refIdx[0] = -1;
+        mv_dst.refIdx[1] = -1;
+        mv_dst.predFlag[0] = 0;
+        mv_dst.predFlag[1] = 0;
+        return mv_dst;
+      }
+    }
+    else
       return pb_info.get(x,y).mv;
   }
 

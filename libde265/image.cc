@@ -212,6 +212,7 @@ de265_image::de265_image()
 
   bIlRefPic = false;
   equalPictureSizeAndOffsetFlag = false;
+  interLayerMotionPredictionEnabled = false;
   for (int i = 0; i<10; i++) {
     il_scaling_parameters[10] = -1;
   }
@@ -497,17 +498,14 @@ de265_error de265_image::copy_image(const de265_image* src)
   return err;
 }
 
-void de265_image::copy_metadata_pointers(const de265_image* src)
+void de265_image::set_lower_layer_picture(const de265_image* src)
 {
   if (width != src->get_width() || height != src->get_height()) {
     assert( false );
   }
-  assert( bIlRefPic );
   
-  cb_info.copy_pointer(&src->cb_info);
-  pb_info.copy_pointer(&src->pb_info);
-
   // Save pointer to lower layer reference
+  assert( bIlRefPic );
   ilRefPic = src;
 
   // Copy the pointers to the slice segment headers.
@@ -531,125 +529,6 @@ void de265_image::set_inter_layer_upsampling_parameters(int upsampling_params[2]
     for (int i = 0; i < 10; i++) {
       il_upsampling_parameters[j][i] = upsampling_params[j][i];
     }
-  }
-}
-
-
-/* H.8.1.4.2 Resampling process of picture motion and mode parameters
- *
- * Upsample the metadata from the given picture using the given scaling parameters.
-*/
-void de265_image::upsample_metadata(const de265_image* src)
-{
-  assert( bIlRefPic );
-
-  int PicWidthInSamplesCurrY      = get_width();
-  int PiPicHeightInSamplesCurrY   = get_height();
-  int PicWidthInSamplesRefLayerY  = src->get_width();
-  int PicHeightInSamplesRefLayerY = src->get_height();
-
-  int ScaledRefRegionWidthInSamplesY  = il_scaling_parameters[6];
-  int RefLayerRegionWidthInSamplesY   = il_scaling_parameters[7];
-  int ScaledRefRegionHeightInSamplesY = il_scaling_parameters[8];
-  int RefLayerRegionHeightInSamplesY  = il_scaling_parameters[9];
-
-  int xMax = ((PicWidthInSamplesCurrY    + 15) >> 4) - 1;
-  int yMax = ((PiPicHeightInSamplesCurrY + 15) >> 4) - 1;
-
-  int xPb, yPb, xPCtr, yPCtr, xRef, yRef, xRL, yRL, width, height;
-  for (int xB = 0; xB <= xMax; xB++) {
-    for (int yB = 0; yB <= yMax; yB++) {
-      xPb = xB << 4;
-      yPb = yB << 4;
-
-      // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
-      xPCtr = xPb + 8;  // (H 65)
-      yPCtr = yPb + 8;  // (H 66)
-
-      // 2. The variables xRef and yRef are derived as follows:
-      xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
-      yRef = (((yPCtr - il_scaling_parameters[1]) * il_scaling_parameters[3] + (1 << 15)) >> 16 ) + il_scaling_parameters[5];  // (H 68)
-
-      // 3. The rounded reference layer luma sample location ( xRL, yRL ) is derived as follows:
-      xRL = ((xRef + 4) >> 4) << 4;  // (H 69)
-      yRL = ((yRef + 4) >> 4) << 4;  // (H 70)
-
-      // Calculate the width and height of the block. This is necessary since "set_pred_mode" and
-      // "set_mv_info" are not capable of handling blocks that reach outside the picture bundary.
-      width = 16;
-      height = 16;
-      if (xPb+16 > PicWidthInSamplesCurrY) {
-        width = (PicWidthInSamplesCurrY - xPb);
-      }
-      if (yPb+16 > PiPicHeightInSamplesCurrY) {
-        height = (PiPicHeightInSamplesCurrY - yPb);
-      }
-
-      // 4. Upsample the prediction mode. (H 71)
-      PredMode rsPredMode;
-      if( xRL < 0 || xRL >= PicWidthInSamplesRefLayerY || yRL < 0 || yRL >= PicHeightInSamplesRefLayerY ) {
-        rsPredMode = MODE_INTRA;
-      }
-      else {
-        rsPredMode = src->get_pred_mode(xRL, yRL);
-      }
-      set_pred_mode(xPb, yPb, width, height, rsPredMode);
-
-      // 5. Upsample the motion vectors and prediction flags
-      MotionVectorSpec mv_dst;
-      if (rsPredMode != MODE_INTRA) {
-        const MotionVectorSpec mv_src = src->get_mv_info(xRL, yRL);
-        // For X being each of 0 and 1...
-        for (int l=0; l<2; l++) {
-          // RefIdx, predFlag
-          mv_dst.refIdx[l] = mv_src.refIdx[l];     // (H 72)
-          mv_dst.predFlag[l] = mv_src.predFlag[l]; // (H 73)
-
-          // Motion vector. X-component.
-          if (ScaledRefRegionWidthInSamplesY != RefLayerRegionWidthInSamplesY) {
-            int rlMvLX = mv_src.mv[l].x;
-            int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionWidthInSamplesY << 8) + (RefLayerRegionWidthInSamplesY >> 1)) / RefLayerRegionWidthInSamplesY); // (H 74)
-            mv_dst.mv[l].x = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 75)
-          }
-          else {
-            mv_dst.mv[l].x = mv_src.mv[l].x; // (H 76)
-          }
-
-          // Motion vector. Y-component.
-          if (ScaledRefRegionHeightInSamplesY != RefLayerRegionHeightInSamplesY) {
-            int rlMvLX = mv_src.mv[l].y;
-            int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionHeightInSamplesY << 8) + (RefLayerRegionHeightInSamplesY >> 1)) / RefLayerRegionHeightInSamplesY); // (H 77)
-            mv_dst.mv[l].y = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 78)
-          }
-          else {
-            mv_dst.mv[l].y = mv_src.mv[l].y;  // (H 79)
-          }
-        }
-      }
-      else {
-        // Otherwise (rsPredMode is equal to MODE_INTRA), the following applies:
-        mv_dst.mv[0].x = 0;
-        mv_dst.mv[0].y = 0;
-        mv_dst.mv[1].x = 0;
-        mv_dst.mv[1].y = 0;
-        mv_dst.refIdx[0] = -1;
-        mv_dst.refIdx[1] = -1;
-        mv_dst.predFlag[0] = 0;
-        mv_dst.predFlag[1] = 0;
-      }
-      // Set the derived motion info in the output picture
-      set_mv_info(xPb, yPb, width, height, mv_dst);
-    }
-  }
-
-  // Save pointer to lower layer reference
-  ilRefPic = src;
-
-  // Copy the pointers to the slice segment headers.
-  // TODO: Is this a good idea?
-  slices.clear();
-  for (int i = 0; i < src->slices.size(); i++) {
-    slices.push_back(src->slices.at(i));
   }
 }
 
@@ -702,7 +581,7 @@ void de265_image::copy_lines_from(const de265_image* src, int first, int end)
   }
 }
 
-void de265_image::get_pointers_from(de265_image *src)
+void de265_image::get_pixel_pointers_from(de265_image *src)
 {
   if (width != src->get_width() || height != src->get_height()) {
     assert( false );
@@ -720,166 +599,152 @@ void de265_image::get_pointers_from(de265_image *src)
   // Strides
   stride        = src->stride;
   chroma_stride = src->chroma_stride;
-  
-  // Metadata
-  cb_info.copy_pointer(&src->cb_info);
-  pb_info.copy_pointer(&src->pb_info);
-
-  // Save pointer to lower layer reference
-  ilRefPic = src;
-
-  // Copy the pointers to the slice segment headers.
-  // TODO: Is this a good idea?
-  slices.clear();
-  for (int i = 0; i < src->slices.size(); i++) {
-    slices.push_back(src->slices.at(i));
-  }
 }
 
-void de265_image::upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10])
-{
-  assert( bIlRefPic );
+//void de265_image::upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10])
+//{
+//  assert( bIlRefPic );
+//
+//  int src_size[2] = {rlPic->get_width(), rlPic->get_height()};
+//  int dst_size[2] = { get_width(), get_height() };
+//  ctx->acceleration.resampling_process_of_luma_sample_values(rlPic->get_image_plane(0), rlPic->get_luma_stride(), src_size,
+//                                                              get_image_plane(0), get_luma_stride(), dst_size,
+//                                                              upsampling_params[0] );
+//
+//  // Chroma
+//  src_size[0] = rlPic->get_width(1);
+//  src_size[1] = rlPic->get_height(1);
+//  dst_size[0] = get_width(1);
+//  dst_size[1] = get_height(1);
+//  ctx->acceleration.resampling_process_of_chroma_sample_values(rlPic->get_image_plane(1), rlPic->get_chroma_stride(), src_size,
+//                                                              get_image_plane(1), get_chroma_stride(), dst_size,
+//                                                              upsampling_params[1] );
+//  ctx->acceleration.resampling_process_of_chroma_sample_values(rlPic->get_image_plane(2), rlPic->get_chroma_stride(), src_size,
+//                                                              get_image_plane(2), get_chroma_stride(), dst_size,
+//                                                              upsampling_params[1] );
+//}
 
-  int src_size[2] = {rlPic->get_width(), rlPic->get_height()};
-  int dst_size[2] = { get_width(), get_height() };
-  ctx->acceleration.resampling_process_of_luma_sample_values(rlPic->get_image_plane(0), rlPic->get_luma_stride(), src_size,
-                                                              get_image_plane(0), get_luma_stride(), dst_size,
-                                                              upsampling_params[0] );
-
-  // Chroma
-  src_size[0] = rlPic->get_width(1);
-  src_size[1] = rlPic->get_height(1);
-  dst_size[0] = get_width(1);
-  dst_size[1] = get_height(1);
-  ctx->acceleration.resampling_process_of_chroma_sample_values(rlPic->get_image_plane(1), rlPic->get_chroma_stride(), src_size,
-                                                              get_image_plane(1), get_chroma_stride(), dst_size,
-                                                              upsampling_params[1] );
-  ctx->acceleration.resampling_process_of_chroma_sample_values(rlPic->get_image_plane(2), rlPic->get_chroma_stride(), src_size,
-                                                              get_image_plane(2), get_chroma_stride(), dst_size,
-                                                              upsampling_params[1] );
-}
-
-void de265_image::colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2])
-{
-  assert( bIlRefPic );
-
-  int PicWidthInSamplesRefLayerY  = rlPic->get_width();
-  int PicHeightInSamplesRefLayerY = rlPic->get_height();
-  int PicHeightInSamplesRefLayerC = rlPic->get_height(1);
-  int PicWidthInSamplesRefLayerC  = rlPic->get_width(1);
-
-  int SubWidthRefLayerC = colourMappingParams[0];
-  int SubHeightRefLayerC = colourMappingParams[1];
-
-  int maxValOut = (1 << map->BitDepthCmOutputY) - 1;
-
-  uint8_t* src_Y  = rlPic->get_image_plane(0);
-  uint8_t* src_cb = rlPic->get_image_plane(1);
-  uint8_t* src_cr = rlPic->get_image_plane(2);
-  int strideY = rlPic->get_luma_stride();
-  int strideC = rlPic->get_chroma_stride();
-
-  uint8_t* dst_Y  = get_image_plane(0);
-  
-  for (int xP = 0; xP < PicWidthInSamplesRefLayerY - 1; xP++) {
-    for (int yP = 0; yP < PicHeightInSamplesRefLayerY - 1; yP++) {
-      
-      // The chroma sample location ( xPC, yPC ) is set equal to ( xP / SubWidthRefLayerC, yP / SubHeightRefLayerC ).
-      int xPC = xP / SubWidthRefLayerC;
-      int yPC = yP / SubHeightRefLayerC;
-
-      // 1. The value of cmLumaSample is derived by applying the following ordered steps:
-      int yShift2Idx = map->BitDepthCmInputY - map->cm_octant_depth - map->cm_y_part_num_log2;  // (H 80)
-      int cShift2Idx = map->BitDepthCmInputC - map->cm_octant_depth;                            // (H 81)
-
-      // 2. The variables nMappingShift and nMappingOffset are derived as follows:
-      int nMappingShift = 10 + map->BitDepthCmInputY - map->BitDepthCmOutputY;  // (H 82)
-      int nMappingOffset = 1 << ( nMappingShift - 1 );                          // (H 83)
-
-      // 3. The variables tempCb and tempCr are derived as follows:
-      int tempCb, tempCr;
-
-      // Get pointers to y line for yPC
-      uint8_t* rlPicSampleCb_yPC = src_cb + yPC * strideC;
-      uint8_t* rlPicSampleCr_yPC = src_cr + yPC * strideC;
-      
-      if (SubWidthRefLayerC == 2 && SubHeightRefLayerC == 2) {
-        if ((xP % 2) == 0 && (yP % 2) == 0) {
-          int yP2C = libde265_max( 0, yPC - 1 );                                      // (H 84)
-          
-          // Get poitner to y line for yPC2
-          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
-          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
-
-          tempCb = (rlPicSampleCb_yPC[xPC] * 3 + rlPicSampleCb_yP2C[xPC] + 2) >> 2;   // (H 85)
-          tempCr = (rlPicSampleCr_yP2C[xPC] * 3 + rlPicSampleCr_yP2C[xPC] + 2) >> 2;  // (H 86)
-        }
-        else if ((xP % 2) == 0 && (yP % 2) == 1) {
-          int yP2C = libde265_min( yPC + 1, PicHeightInSamplesRefLayerC - 1 );        // (H 87)
-
-          // Get poitner to y line for yPC2
-          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
-          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
-
-          tempCb = (rlPicSampleCb_yPC[xPC] * 3 + rlPicSampleCb_yP2C[xPC] + 2 ) >> 2;   // (H 88)
-          tempCr = (rlPicSampleCr_yPC[xPC] * 3 + rlPicSampleCr_yP2C[xPC] + 2 ) >> 2;   // (H 89)
-        }
-        else if ((xP % 2) == 1 && (yP % 2) == 0) {
-          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 90)
-          int yP2C = libde265_max( 0, yPC - 1 );                                       // (H 91)
-
-          // Get poitner to y line for yPC2
-          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
-          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
-
-          tempCb = (rlPicSampleCb_yP2C[xPC] + rlPicSampleCb_yP2C[xP2C] + (rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C]) * 3 + 4) >> 3;  // (H 92)
-          tempCr = (rlPicSampleCr_yP2C[xPC] + rlPicSampleCr_yP2C[xP2C] + (rlPicSampleCr_yPC[yPC] + rlPicSampleCr_yPC[xP2C]) * 3 + 4) >> 3;  // (H 93)
-        }
-        else if ((xP % 2) == 1 && (yP % 2) == 1) {
-          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 94)
-          int yP2C = libde265_min( yPC + 1, PicHeightInSamplesRefLayerC - 1 );         // (H 95)
-
-          // Get poitner to y line for yPC2
-          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
-          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
-
-          tempCb = ((rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C]) * 3 + rlPicSampleCb_yP2C[xPC] + rlPicSampleCb_yP2C[xP2C] + 4) >> 3;  // (H 96)
-          tempCr = ((rlPicSampleCr_yPC[xPC] + rlPicSampleCr_yPC[xP2C]) * 3 + rlPicSampleCr_yP2C[xPC] + rlPicSampleCr_yP2C[xP2C] + 4) >> 3;  // (H 97)
-        }
-      }
-      else if (SubWidthRefLayerC == 2) {
-        if ((xP % 2) == 1) {
-          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 98)
-          
-          tempCb = (rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C] + 1 ) >> 1;       // (H 99)
-          tempCr = (rlPicSampleCr_yPC[xPC] + rlPicSampleCr_yPC[xP2C] + 1 ) >> 1;       // (H 100)
-        }
-        else {
-          tempCb = rlPicSampleCb_yPC[xPC];                                             // (H 101)
-          tempCr = rlPicSampleCr_yPC[xPC];                                             // (H 102)
-        }
-      }
-      else {
-        tempCb = rlPicSampleCb_yPC[xPC];                                               // (H 103)
-        tempCr = rlPicSampleCr_yPC[xPC];                                               // (H 104)
-      }
-
-      // Get pointer to input/output yP line
-      uint8_t* cmLumaSample_yP = dst_Y + yP * stride;
-      uint8_t* rlPicSampleY_yP = src_Y + yP * strideY;
-
-      // 4. The value of cmLumaSample is derived as follows:
-      int idxY = rlPicSampleY_yP[xP] >> yShift2Idx;
-      int idxCb = (map->cm_octant_depth == 1) ? (tempCb >= map->CMThreshU) : (tempCb >> cShift2Idx);
-      int idxCr = (map->cm_octant_depth == 1) ? (tempCr >= map->CMThreshV) : (tempCr >> cShift2Idx);
-
-      cmLumaSample_yP[xP] = Clip3( 0, maxValOut,
-                           ((map->LutY[idxY][idxCb][idxCr][0] * rlPicSampleY_yP[xP] + map->LutY[idxY][idxCb][idxCr][1] * tempCb + 
-                             map->LutY[idxY][idxCb][idxCr][2] * tempCr + nMappingOffset ) >> nMappingShift ) + 
-                             map->LutY[idxY][idxCb][idxCr][3]); // (H 108) (H-109)
-    }
-  }
-}
+//void de265_image::colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2])
+//{
+//  assert( bIlRefPic );
+//
+//  int PicWidthInSamplesRefLayerY  = rlPic->get_width();
+//  int PicHeightInSamplesRefLayerY = rlPic->get_height();
+//  int PicHeightInSamplesRefLayerC = rlPic->get_height(1);
+//  int PicWidthInSamplesRefLayerC  = rlPic->get_width(1);
+//
+//  int SubWidthRefLayerC = colourMappingParams[0];
+//  int SubHeightRefLayerC = colourMappingParams[1];
+//
+//  int maxValOut = (1 << map->BitDepthCmOutputY) - 1;
+//
+//  uint8_t* src_Y  = rlPic->get_image_plane(0);
+//  uint8_t* src_cb = rlPic->get_image_plane(1);
+//  uint8_t* src_cr = rlPic->get_image_plane(2);
+//  int strideY = rlPic->get_luma_stride();
+//  int strideC = rlPic->get_chroma_stride();
+//
+//  uint8_t* dst_Y  = get_image_plane(0);
+//  
+//  for (int xP = 0; xP < PicWidthInSamplesRefLayerY - 1; xP++) {
+//    for (int yP = 0; yP < PicHeightInSamplesRefLayerY - 1; yP++) {
+//      
+//      // The chroma sample location ( xPC, yPC ) is set equal to ( xP / SubWidthRefLayerC, yP / SubHeightRefLayerC ).
+//      int xPC = xP / SubWidthRefLayerC;
+//      int yPC = yP / SubHeightRefLayerC;
+//
+//      // 1. The value of cmLumaSample is derived by applying the following ordered steps:
+//      int yShift2Idx = map->BitDepthCmInputY - map->cm_octant_depth - map->cm_y_part_num_log2;  // (H 80)
+//      int cShift2Idx = map->BitDepthCmInputC - map->cm_octant_depth;                            // (H 81)
+//
+//      // 2. The variables nMappingShift and nMappingOffset are derived as follows:
+//      int nMappingShift = 10 + map->BitDepthCmInputY - map->BitDepthCmOutputY;  // (H 82)
+//      int nMappingOffset = 1 << ( nMappingShift - 1 );                          // (H 83)
+//
+//      // 3. The variables tempCb and tempCr are derived as follows:
+//      int tempCb, tempCr;
+//
+//      // Get pointers to y line for yPC
+//      uint8_t* rlPicSampleCb_yPC = src_cb + yPC * strideC;
+//      uint8_t* rlPicSampleCr_yPC = src_cr + yPC * strideC;
+//      
+//      if (SubWidthRefLayerC == 2 && SubHeightRefLayerC == 2) {
+//        if ((xP % 2) == 0 && (yP % 2) == 0) {
+//          int yP2C = libde265_max( 0, yPC - 1 );                                      // (H 84)
+//          
+//          // Get poitner to y line for yPC2
+//          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
+//          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
+//
+//          tempCb = (rlPicSampleCb_yPC[xPC] * 3 + rlPicSampleCb_yP2C[xPC] + 2) >> 2;   // (H 85)
+//          tempCr = (rlPicSampleCr_yP2C[xPC] * 3 + rlPicSampleCr_yP2C[xPC] + 2) >> 2;  // (H 86)
+//        }
+//        else if ((xP % 2) == 0 && (yP % 2) == 1) {
+//          int yP2C = libde265_min( yPC + 1, PicHeightInSamplesRefLayerC - 1 );        // (H 87)
+//
+//          // Get poitner to y line for yPC2
+//          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
+//          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
+//
+//          tempCb = (rlPicSampleCb_yPC[xPC] * 3 + rlPicSampleCb_yP2C[xPC] + 2 ) >> 2;   // (H 88)
+//          tempCr = (rlPicSampleCr_yPC[xPC] * 3 + rlPicSampleCr_yP2C[xPC] + 2 ) >> 2;   // (H 89)
+//        }
+//        else if ((xP % 2) == 1 && (yP % 2) == 0) {
+//          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 90)
+//          int yP2C = libde265_max( 0, yPC - 1 );                                       // (H 91)
+//
+//          // Get poitner to y line for yPC2
+//          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
+//          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
+//
+//          tempCb = (rlPicSampleCb_yP2C[xPC] + rlPicSampleCb_yP2C[xP2C] + (rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C]) * 3 + 4) >> 3;  // (H 92)
+//          tempCr = (rlPicSampleCr_yP2C[xPC] + rlPicSampleCr_yP2C[xP2C] + (rlPicSampleCr_yPC[yPC] + rlPicSampleCr_yPC[xP2C]) * 3 + 4) >> 3;  // (H 93)
+//        }
+//        else if ((xP % 2) == 1 && (yP % 2) == 1) {
+//          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 94)
+//          int yP2C = libde265_min( yPC + 1, PicHeightInSamplesRefLayerC - 1 );         // (H 95)
+//
+//          // Get poitner to y line for yPC2
+//          uint8_t* rlPicSampleCb_yP2C = src_cb + yP2C * strideC;
+//          uint8_t* rlPicSampleCr_yP2C = src_cr + yP2C * strideC;
+//
+//          tempCb = ((rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C]) * 3 + rlPicSampleCb_yP2C[xPC] + rlPicSampleCb_yP2C[xP2C] + 4) >> 3;  // (H 96)
+//          tempCr = ((rlPicSampleCr_yPC[xPC] + rlPicSampleCr_yPC[xP2C]) * 3 + rlPicSampleCr_yP2C[xPC] + rlPicSampleCr_yP2C[xP2C] + 4) >> 3;  // (H 97)
+//        }
+//      }
+//      else if (SubWidthRefLayerC == 2) {
+//        if ((xP % 2) == 1) {
+//          int xP2C = libde265_min( xPC + 1, PicWidthInSamplesRefLayerC - 1 );          // (H 98)
+//          
+//          tempCb = (rlPicSampleCb_yPC[xPC] + rlPicSampleCb_yPC[xP2C] + 1 ) >> 1;       // (H 99)
+//          tempCr = (rlPicSampleCr_yPC[xPC] + rlPicSampleCr_yPC[xP2C] + 1 ) >> 1;       // (H 100)
+//        }
+//        else {
+//          tempCb = rlPicSampleCb_yPC[xPC];                                             // (H 101)
+//          tempCr = rlPicSampleCr_yPC[xPC];                                             // (H 102)
+//        }
+//      }
+//      else {
+//        tempCb = rlPicSampleCb_yPC[xPC];                                               // (H 103)
+//        tempCr = rlPicSampleCr_yPC[xPC];                                               // (H 104)
+//      }
+//
+//      // Get pointer to input/output yP line
+//      uint8_t* cmLumaSample_yP = dst_Y + yP * stride;
+//      uint8_t* rlPicSampleY_yP = src_Y + yP * strideY;
+//
+//      // 4. The value of cmLumaSample is derived as follows:
+//      int idxY = rlPicSampleY_yP[xP] >> yShift2Idx;
+//      int idxCb = (map->cm_octant_depth == 1) ? (tempCb >= map->CMThreshU) : (tempCb >> cShift2Idx);
+//      int idxCr = (map->cm_octant_depth == 1) ? (tempCr >= map->CMThreshV) : (tempCr >> cShift2Idx);
+//
+//      cmLumaSample_yP[xP] = Clip3( 0, maxValOut,
+//                           ((map->LutY[idxY][idxCb][idxCr][0] * rlPicSampleY_yP[xP] + map->LutY[idxY][idxCb][idxCr][1] * tempCb + 
+//                             map->LutY[idxY][idxCb][idxCr][2] * tempCr + nMappingOffset ) >> nMappingShift ) + 
+//                             map->LutY[idxY][idxCb][idxCr][3]); // (H 108) (H-109)
+//    }
+//  }
+//}
 
 void de265_image::exchange_pixel_data_with(de265_image& b)
 {
@@ -1018,6 +883,7 @@ void de265_image::clear_metadata()
 
 void de265_image::set_mv_info(int x,int y, int nPbW,int nPbH, const MotionVectorSpec& mv)
 {
+  assert(!bIlRefPic);
   int log2PuSize = 2;
 
   int xPu = x >> log2PuSize;
@@ -1111,10 +977,116 @@ bool de265_image::available_pred_blk(int xC,int yC, int nCbS, int xP, int yP,
   return availableN;
 }
 
-MotionVectorSpec de265_image::get_mv_info_lower_layer(int x, int y) const
+MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
 {
-  // Invoke the upsampling process for motion vectors
-  MotionVectorSpec mv;
-  mv.mv[0].x = 0;
-  return mv;
+  assert(ilRefPic != NULL);
+  // Invoke the upsampling process for motion vectors 
+
+  int PicWidthInSamplesRefLayerY  = ilRefPic->get_width();
+  int PicHeightInSamplesRefLayerY = ilRefPic->get_height();
+
+  int ScaledRefRegionWidthInSamplesY  = il_scaling_parameters[6];
+  int RefLayerRegionWidthInSamplesY   = il_scaling_parameters[7];
+  int ScaledRefRegionHeightInSamplesY = il_scaling_parameters[8];
+  int RefLayerRegionHeightInSamplesY  = il_scaling_parameters[9];
+
+  int xPb = xB << 4;
+  int yPb = yB << 4;
+
+  // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
+  int xPCtr = xPb + 8;  // (H 65)
+  int yPCtr = yPb + 8;  // (H 66)
+
+  // 2. The variables xRef and yRef are derived as follows:
+  int xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
+  int yRef = (((yPCtr - il_scaling_parameters[1]) * il_scaling_parameters[3] + (1 << 15)) >> 16 ) + il_scaling_parameters[5];  // (H 68)
+
+  // 3. The rounded reference layer luma sample location ( xRL, yRL ) is derived as follows:
+  int xRL = ((xRef + 4) >> 4) << 4;  // (H 69)
+  int yRL = ((yRef + 4) >> 4) << 4;  // (H 70)
+
+  // 4. Upsample the prediction mode. (H 71)
+  PredMode rsPredMode;
+  if( xRL < 0 || xRL >= PicWidthInSamplesRefLayerY || yRL < 0 || yRL >= PicHeightInSamplesRefLayerY ) {
+    rsPredMode = MODE_INTRA;
+  }
+  else {
+    rsPredMode = ilRefPic->get_pred_mode(xRL, yRL);
+  }
+
+  // 5. Upsample the motion vectors and prediction flags
+  MotionVectorSpec mv_dst;
+  if (rsPredMode != MODE_INTRA) {
+    const MotionVectorSpec mv_src = ilRefPic->get_mv_info(xRL, yRL);
+    // For X being each of 0 and 1...
+    for (int l=0; l<2; l++) {
+      // RefIdx, predFlag
+      mv_dst.refIdx[l] = mv_src.refIdx[l];     // (H 72)
+      mv_dst.predFlag[l] = mv_src.predFlag[l]; // (H 73)
+
+      // Motion vector. X-component.
+      if (ScaledRefRegionWidthInSamplesY != RefLayerRegionWidthInSamplesY) {
+        int rlMvLX = mv_src.mv[l].x;
+        int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionWidthInSamplesY << 8) + (RefLayerRegionWidthInSamplesY >> 1)) / RefLayerRegionWidthInSamplesY); // (H 74)
+        mv_dst.mv[l].x = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 75)
+      }
+      else {
+        mv_dst.mv[l].x = mv_src.mv[l].x; // (H 76)
+      }
+
+      // Motion vector. Y-component.
+      if (ScaledRefRegionHeightInSamplesY != RefLayerRegionHeightInSamplesY) {
+        int rlMvLX = mv_src.mv[l].y;
+        int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionHeightInSamplesY << 8) + (RefLayerRegionHeightInSamplesY >> 1)) / RefLayerRegionHeightInSamplesY); // (H 77)
+        mv_dst.mv[l].y = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 78)
+      }
+      else {
+        mv_dst.mv[l].y = mv_src.mv[l].y;  // (H 79)
+      }
+    }
+  }
+  else {
+    // Otherwise (rsPredMode is equal to MODE_INTRA), the following applies:
+    mv_dst.mv[0].x = 0;
+    mv_dst.mv[0].y = 0;
+    mv_dst.mv[1].x = 0;
+    mv_dst.mv[1].y = 0;
+    mv_dst.refIdx[0] = -1;
+    mv_dst.refIdx[1] = -1;
+    mv_dst.predFlag[0] = 0;
+    mv_dst.predFlag[1] = 0;
+  }
+
+  return mv_dst;
+}
+
+PredMode de265_image::get_pred_mode_lower_layer(int xB, int yB) const
+{
+  int PicWidthInSamplesRefLayerY  = ilRefPic->get_width();
+  int PicHeightInSamplesRefLayerY = ilRefPic->get_height();
+
+  int xPb = xB << 4;
+  int yPb = yB << 4;
+
+  // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
+  int xPCtr = xPb + 8;  // (H 65)
+  int yPCtr = yPb + 8;  // (H 66)
+
+  // 2. The variables xRef and yRef are derived as follows:
+  int xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
+  int yRef = (((yPCtr - il_scaling_parameters[1]) * il_scaling_parameters[3] + (1 << 15)) >> 16 ) + il_scaling_parameters[5];  // (H 68)
+
+  // 3. The rounded reference layer luma sample location ( xRL, yRL ) is derived as follows:
+  int xRL = ((xRef + 4) >> 4) << 4;  // (H 69)
+  int yRL = ((yRef + 4) >> 4) << 4;  // (H 70)
+
+  // 4. Upsample the prediction mode. (H 71)
+  PredMode rsPredMode;
+  if( xRL < 0 || xRL >= PicWidthInSamplesRefLayerY || yRL < 0 || yRL >= PicHeightInSamplesRefLayerY ) {
+    rsPredMode = MODE_INTRA;
+  }
+  else {
+    rsPredMode = ilRefPic->get_pred_mode(xRL, yRL);
+  }
+  return rsPredMode;
 }

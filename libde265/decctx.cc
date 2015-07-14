@@ -1652,6 +1652,7 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
   }
   ilRefPic[ilRefPicIdx]->PicOrderCntVal = rlPic->PicOrderCntVal;          // Copy POC
   ilRefPic[ilRefPicIdx]->setEqualPictureSizeAndOffsetFlag ( equalPictureSizeAndOffsetFlag );
+  ilRefPic[ilRefPicIdx]->set_lower_layer_picture(rlPic);
 
   if (equalPictureSizeAndOffsetFlag &&
      (BitDepthRefLayerY == BitDepthCurrY) &&
@@ -1662,10 +1663,8 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
 
     // Equal picture sizes, equal bit depths, no cropping.
     // SNR scalability. We do not need to perform any upsampling.
-    // Just copy all information from the lower layer reference.
-    //ilRefPic[ilRefPicIdx]->copy_lines_from(rlPic, 0, rlPic->get_height());  // Copy pixel data
-    //ilRefPic[ilRefPicIdx]->copy_metadata(rlPic);                            // Copy metadata
-    ilRefPic[ilRefPicIdx]->get_pointers_from(rlPic);
+    // Just copy pointers to the lower layer reconstructed pixels
+    ilRefPic[ilRefPicIdx]->get_pixel_pointers_from(rlPic);
   }
   else {
     // Something (resolution, bitdepth, aspect ratio) between the layers is different.
@@ -1713,30 +1712,39 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
         upsampling_params[c][9] = bitDepthCur;
       }
 
+      ilRefPic[ilRefPicIdx]->get_pixel_pointers_from(rlPic);
+      ilRefPic[ilRefPicIdx]->set_inter_layer_upsampling_parameters(upsampling_params);
+
       if (currColourMappingEnableFlag) {
-        // The colour mapping process as specified in clause H.8.1.4.3 is invoked
+        // We will have to apply color mapping.
+        // Maybe also upsampling
+        assert(false);  // TODO
 
-        // Create temporary image
-        de265_image img;
-        de265_image* src = rlPic;
-        img.alloc_image(src->get_width(), src->get_height(), src->get_chroma_format(), &src->sps, false,
-                                src->decctx, src->encctx, src->pts, src->user_data, false);
+        //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
 
-        // The colour mapping process as specified in clause H.8.1.4.3 is invoked
-        int colourMappingParams[2] = {SubWidthRefLayerC, SubHeightRefLayerC };
-        img.colour_mapping( ctx, rlPic, &pps_ext->cm_table, colourMappingParams );
+        //// Create temporary image
+        //de265_image img;
+        //de265_image* src = rlPic;
+        //img.alloc_image(src->get_width(), src->get_height(), src->get_chroma_format(), &src->sps, false,
+        //                        src->decctx, src->encctx, src->pts, src->user_data, false);
 
-        if (equalPictureSizeAndOffsetFlag) {
-          ilRefPic[ilRefPicIdx]->copy_lines_from(&img, 0, rlPic->get_height());  // Copy pixel data
-        }
-        else {
-          // The picture sample resampling process as specified in clause H.8.1.4.1 is invoked
-          ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, &img, upsampling_params);
-        }
+        //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
+        //int colourMappingParams[2] = {SubWidthRefLayerC, SubHeightRefLayerC };
+        //img.colour_mapping( ctx, rlPic, &pps_ext->cm_table, colourMappingParams );
+
+        //if (equalPictureSizeAndOffsetFlag) {
+        //  ilRefPic[ilRefPicIdx]->copy_lines_from(&img, 0, rlPic->get_height());  // Copy pixel data
+        //}
+        //else {
+        //  // The picture sample resampling process as specified in clause H.8.1.4.1 is invoked
+        //  ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, &img, upsampling_params);
+        //}
       }
       else {
+        // The picture has to be upsampled but no color mapping is required.
+
         // the picture sample resampling process as specified in clause H.8.1.4.1 is invoked
-        ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, rlPic, upsampling_params);
+        //ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, rlPic, upsampling_params);
 
         //// DEBUG. DUMP TO FILE
         //FILE *fp = fopen("before_upsampling.txt", "wb");
@@ -1763,12 +1771,10 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
       }
     }
 
-    if (vps_ext->VpsInterLayerMotionPredictionEnabled[vps_ext->LayerIdxInVps[currLayerId]][vps_ext->LayerIdxInVps[rLId]]) {
-      if (equalPictureSizeAndOffsetFlag) {
-        // Copy metadata
-        ilRefPic[ilRefPicIdx]->copy_metadata(rlPic);
-      }
-      else {
+    bool ilPred = vps_ext->VpsInterLayerMotionPredictionEnabled[vps_ext->LayerIdxInVps[currLayerId]][vps_ext->LayerIdxInVps[rLId]];
+    ilRefPic[ilRefPicIdx]->setInterLayerMotionPredictionEnabled(ilPred);
+    if (ilPred) {
+      if (!equalPictureSizeAndOffsetFlag) {
         // The picture motion and mode parameters resampling process as specified in clause H.8.1.4.2 is invoked
         int scaling_parameters[10] = {ScaledRefLayerLeftOffset, ScaledRefLayerTopOffset,
                                       SpatialScaleFactorHorY, SpatialScaleFactorVerY,
@@ -1776,7 +1782,6 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
                                       ScaledRefRegionWidthInSamplesY, RefLayerRegionWidthInSamplesY,
                                       ScaledRefRegionHeightInSamplesY, RefLayerRegionHeightInSamplesY};
         ilRefPic[ilRefPicIdx]->set_inter_layer_metadata_scaling_parameters(scaling_parameters);
-        ilRefPic[ilRefPicIdx]->upsample_metadata(rlPic);
       }
     }
 
