@@ -500,10 +500,6 @@ de265_error de265_image::copy_image(const de265_image* src)
 
 void de265_image::set_lower_layer_picture(const de265_image* src)
 {
-  if (width != src->get_width() || height != src->get_height()) {
-    assert( false );
-  }
-  
   // Save pointer to lower layer reference
   assert( bIlRefPic );
   ilRefPic = src;
