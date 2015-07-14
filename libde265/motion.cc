@@ -651,7 +651,7 @@ void generate_inter_prediction_samples(base_context* ctx,
 
 
 #ifdef DE265_LOG_TRACE
-void logmvcand(const MotionVectorSpec& p)
+void logmvcand(const MotionVectorSpec p)
 {
   for (int v=0;v<2;v++) {
     if (p.predFlag[v]) {
@@ -783,7 +783,7 @@ int derive_spatial_merging_candidates(const de265_image* img,
 
   if (availableA1) {
     idxA1 = computed_candidates++;
-    out_cand[idxA1] = *img->get_mv_info(xA1,yA1);
+    out_cand[idxA1] = img->get_mv_info(xA1,yA1);
 
     logtrace(LogMotion,"spatial merging candidate A1:\n");
     logmvcand(out_cand[idxA1]);
@@ -822,17 +822,17 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB1) {
-    const MotionVectorSpec* b1 = img->get_mv_info(xB1,yB1);
+    const MotionVectorSpec b1 = img->get_mv_info(xB1,yB1);
 
     // B1 == A1 -> discard B1
     if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], b1)) {
+        equal_cand_MV(&out_cand[idxA1], &b1)) {
       idxB1 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B1: redundant to A1\n");
     }
     else {
       idxB1 = computed_candidates++;
-      out_cand[idxB1] = *b1;
+      out_cand[idxB1] = b1;
 
       logtrace(LogMotion,"spatial merging candidate B1:\n");
       logmvcand(out_cand[idxB1]);
@@ -861,17 +861,17 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB0) {
-    const MotionVectorSpec* b0 = img->get_mv_info(xB0,yB0);
+    const MotionVectorSpec b0 = img->get_mv_info(xB0,yB0);
 
     // B0 == B1 -> discard B0
     if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], b0)) {
+        equal_cand_MV(&out_cand[idxB1], &b0)) {
       idxB0 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B0: redundant to B1\n");
     }
     else {
       idxB0 = computed_candidates++;
-      out_cand[idxB0] = *b0;
+      out_cand[idxB0] = b0;
       logtrace(LogMotion,"spatial merging candidate B0:\n");
       logmvcand(out_cand[idxB0]);
     }
@@ -899,17 +899,17 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableA0) {
-    const MotionVectorSpec* a0 = img->get_mv_info(xA0,yA0);
+    const MotionVectorSpec a0 = img->get_mv_info(xA0,yA0);
 
     // A0 == A1 -> discard A0
     if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], a0)) {
+        equal_cand_MV(&out_cand[idxA1], &a0)) {
       idxA0 = idxA1;
       logtrace(LogMotion,"spatial merging candidate A0: redundant to A1\n");
     }
     else {
       idxA0 = computed_candidates++;
-      out_cand[idxA0] = *a0;
+      out_cand[idxA0] = a0;
       logtrace(LogMotion,"spatial merging candidate A0:\n");
       logmvcand(out_cand[idxA0]);
     }
@@ -942,23 +942,23 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB2) {
-    const MotionVectorSpec* b2 = img->get_mv_info(xB2,yB2);
+    const MotionVectorSpec b2 = img->get_mv_info(xB2,yB2);
 
     // B2 == B1 -> discard B2
     if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], b2)) {
+        equal_cand_MV(&out_cand[idxB1], &b2)) {
       idxB2 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to B1\n");
     }
     // B2 == A1 -> discard B2
     else if (availableA1 &&
-             equal_cand_MV(&out_cand[idxA1], b2)) {
+             equal_cand_MV(&out_cand[idxA1], &b2)) {
       idxB2 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to A1\n");
     }
     else {
       idxB2 = computed_candidates++;
-      out_cand[idxB2] = *b2;
+      out_cand[idxB2] = b2;
       logtrace(LogMotion,"spatial merging candidate B2:\n");
       logmvcand(out_cand[idxB2]);
     }
@@ -1109,25 +1109,25 @@ void derive_collocated_motion_vectors(base_context* ctx,
 
   // get the collocated MV
 
-  const MotionVectorSpec* mvi = colImg->get_mv_info(xColPb,yColPb);
+  const MotionVectorSpec mvi = colImg->get_mv_info(xColPb,yColPb);
   int listCol;
   int refIdxCol;
   MotionVector mvCol;
 
   logtrace(LogMotion,"read MVI %d;%d:\n",xColPb,yColPb);
-  logmvcand(*mvi);
+  logmvcand(mvi);
 
 
   // collocated MV uses only L1 -> use L1
-  if (mvi->predFlag[0]==0) {
-    mvCol = mvi->mv[1];
-    refIdxCol = mvi->refIdx[1];
+  if (mvi.predFlag[0]==0) {
+    mvCol = mvi.mv[1];
+    refIdxCol = mvi.refIdx[1];
     listCol = 1;
   }
   // collocated MV uses only L0 -> use L0
-  else if (mvi->predFlag[1]==0) {
-    mvCol = mvi->mv[0];
-    refIdxCol = mvi->refIdx[0];
+  else if (mvi.predFlag[1]==0) {
+    mvCol = mvi.mv[0];
+    refIdxCol = mvi.refIdx[0];
     listCol = 0;
   }
   // collocated MV uses L0 and L1
@@ -1175,14 +1175,14 @@ void derive_collocated_motion_vectors(base_context* ctx,
      */
 
     if (allRefFramesBeforeCurrentFrame) {
-      mvCol = mvi->mv[X];
-      refIdxCol = mvi->refIdx[X];
+      mvCol = mvi.mv[X];
+      refIdxCol = mvi.refIdx[X];
       listCol = X;
     }
     else {
       int N = shdr->collocated_from_l0_flag;
-      mvCol = mvi->mv[N];
-      refIdxCol = mvi->refIdx[N];
+      mvCol = mvi.mv[N];
+      refIdxCol = mvi.refIdx[N];
       listCol = N;
     }
   }
@@ -1621,32 +1621,32 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec* vi = img->get_mv_info(xA[k],yA[k]);
+      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
       logtrace(LogMotion,"MVP A%d=\n",k);
       logmvcand(*vi);
 
       const de265_image* imgX = NULL;
-      if (vi->predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi->refIdx[X]], shdr->InterLayerRefPic[X][vi->refIdx[X]]);
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
       const de265_image* imgY = NULL;
-      if (vi->predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi->refIdx[Y]], shdr->InterLayerRefPic[Y][vi->refIdx[Y]]);
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
 
       // check whether the predictor X is available and references the same POC
-      if (vi->predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
+      if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with same POC\n",k,X);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[X];
-        refIdxA = vi->refIdx[X];
+        out_mvLXN[A] = vi.mv[X];
+        refIdxA = vi.refIdx[X];
       }
       // check whether the other predictor (Y) is available and references the same POC
-      else if (vi->predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
+      else if (vi.predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with same POC\n",k,Y);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[Y];
-        refIdxA = vi->refIdx[Y];
+        out_mvLXN[A] = vi.mv[Y];
+        refIdxA = vi.refIdx[Y];
       }
     }
   }
@@ -1663,25 +1663,25 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec* vi = img->get_mv_info(xA[k],yA[k]);
-      if (vi->predFlag[X]==1 &&
-          shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi->refIdx[X] ]) {
+      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
+      if (vi.predFlag[X]==1 &&
+          shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
 
         logtrace(LogMotion,"take A%D/L%d as A candidate with different POCs\n",k,X);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[X];
-        refIdxA = vi->refIdx[X];
+        out_mvLXN[A] = vi.mv[X];
+        refIdxA = vi.refIdx[X];
         refPicList = X;
       }
-      else if (vi->predFlag[Y]==1 &&
-               shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi->refIdx[Y] ]) {
+      else if (vi.predFlag[Y]==1 &&
+               shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi.refIdx[Y] ]) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with different POCs\n",k,Y);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[Y];
-        refIdxA = vi->refIdx[Y];
+        out_mvLXN[A] = vi.mv[Y];
+        refIdxA = vi.refIdx[Y];
         refPicList = Y;
       }
     }
@@ -1755,29 +1755,29 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec* vi = img->get_mv_info(xB[k],yB[k]);
+      const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
       logtrace(LogMotion,"MVP B%d=\n",k);
       logmvcand(*vi);
 
 
       const de265_image* imgX = NULL;
-      if (vi->predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi->refIdx[X]], shdr->InterLayerRefPic[X][vi->refIdx[X]]);
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
       const de265_image* imgY = NULL;
-      if (vi->predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi->refIdx[Y]], shdr->InterLayerRefPic[Y][vi->refIdx[Y]]);
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
 
-      if (vi->predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
+      if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"a) take B%d/L%d as B candidate with same POC\n",k,X);
 
         out_availableFlagLXN[B]=1;
-        out_mvLXN[B] = vi->mv[X];
-        refIdxB = vi->refIdx[X];
+        out_mvLXN[B] = vi.mv[X];
+        refIdxB = vi.refIdx[X];
       }
-      else if (vi->predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
+      else if (vi.predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"b) take B%d/L%d as B candidate with same POC\n",k,Y);
 
         out_availableFlagLXN[B]=1;
-        out_mvLXN[B] = vi->mv[Y];
-        refIdxB = vi->refIdx[Y];
+        out_mvLXN[B] = vi.mv[Y];
+        refIdxB = vi.refIdx[Y];
       }
     }
   }
@@ -1810,20 +1810,20 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
       if (availableB[k]) {
         int Y=1-X;
 
-        const MotionVectorSpec* vi = img->get_mv_info(xB[k],yB[k]);
+        const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
 
-        if (vi->predFlag[X]==1 &&
-            shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi->refIdx[X] ]) {
+        if (vi.predFlag[X]==1 &&
+            shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
           out_availableFlagLXN[B]=1;
-          out_mvLXN[B] = vi->mv[X];
-          refIdxB = vi->refIdx[X];
+          out_mvLXN[B] = vi.mv[X];
+          refIdxB = vi.refIdx[X];
           refPicList = X;
         }
-        else if (vi->predFlag[Y]==1 &&
-                 shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi->refIdx[Y] ]) {
+        else if (vi.predFlag[Y]==1 &&
+                 shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi.refIdx[Y] ]) {
           out_availableFlagLXN[B]=1;
-          out_mvLXN[B] = vi->mv[Y];
-          refIdxB = vi->refIdx[Y];
+          out_mvLXN[B] = vi.mv[Y];
+          refIdxB = vi.refIdx[Y];
           refPicList = Y;
         }
       }

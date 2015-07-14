@@ -598,31 +598,31 @@ void de265_image::upsample_metadata(const de265_image* src)
       // 5. Upsample the motion vectors and prediction flags
       MotionVectorSpec mv_dst;
       if (rsPredMode != MODE_INTRA) {
-        const MotionVectorSpec *mv_src = src->get_mv_info(xRL, yRL);
+        const MotionVectorSpec mv_src = src->get_mv_info(xRL, yRL);
         // For X being each of 0 and 1...
         for (int l=0; l<2; l++) {
           // RefIdx, predFlag
-          mv_dst.refIdx[l] = mv_src->refIdx[l];     // (H 72)
-          mv_dst.predFlag[l] = mv_src->predFlag[l]; // (H 73)
+          mv_dst.refIdx[l] = mv_src.refIdx[l];     // (H 72)
+          mv_dst.predFlag[l] = mv_src.predFlag[l]; // (H 73)
 
           // Motion vector. X-component.
           if (ScaledRefRegionWidthInSamplesY != RefLayerRegionWidthInSamplesY) {
-            int rlMvLX = mv_src->mv[l].x;
+            int rlMvLX = mv_src.mv[l].x;
             int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionWidthInSamplesY << 8) + (RefLayerRegionWidthInSamplesY >> 1)) / RefLayerRegionWidthInSamplesY); // (H 74)
             mv_dst.mv[l].x = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 75)
           }
           else {
-            mv_dst.mv[l].x = mv_src->mv[l].x; // (H 76)
+            mv_dst.mv[l].x = mv_src.mv[l].x; // (H 76)
           }
 
           // Motion vector. Y-component.
           if (ScaledRefRegionHeightInSamplesY != RefLayerRegionHeightInSamplesY) {
-            int rlMvLX = mv_src->mv[l].y;
+            int rlMvLX = mv_src.mv[l].y;
             int scaleMVX = Clip3( -4096, 4095, ((ScaledRefRegionHeightInSamplesY << 8) + (RefLayerRegionHeightInSamplesY >> 1)) / RefLayerRegionHeightInSamplesY); // (H 77)
             mv_dst.mv[l].y = Clip3( -32768, 32767, Sign( scaleMVX *	rlMvLX) * ((abs_value(scaleMVX * rlMvLX) + 127) >> 8)); // (H 78)
           }
           else {
-            mv_dst.mv[l].y = mv_src->mv[l].y;  // (H 79)
+            mv_dst.mv[l].y = mv_src.mv[l].y;  // (H 79)
           }
         }
       }
@@ -1109,4 +1109,12 @@ bool de265_image::available_pred_blk(int xC,int yC, int nCbS, int xP, int yP,
   }
 
   return availableN;
+}
+
+MotionVectorSpec de265_image::get_mv_info_lower_layer(int x, int y) const
+{
+  // Invoke the upsampling process for motion vectors
+  MotionVectorSpec mv;
+  mv.mv[0].x = 0;
+  return mv;
 }

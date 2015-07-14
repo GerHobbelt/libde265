@@ -384,6 +384,8 @@ public:
   // The colour mapping process as specified in clause H.8.1.4.3 is invoked
   void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
 
+  MotionVectorSpec get_mv_info_lower_layer(int x, int y) const;
+
 private:
   bool bIlRefPic;
   bool equalPictureSizeAndOffsetFlag;  // Is upsampling required? (True for SNR scalability)
@@ -854,9 +856,15 @@ public:
 
   // --- PB metadata access ---
 
-  const MotionVectorSpec* get_mv_info(int x,int y) const
+  const MotionVectorSpec get_mv_info(int x,int y) const
   {
-    return &pb_info.get(x,y).mv;
+    //if (bIlRefPic) {
+    //  // Get mv info from lower layer image
+    //  update_mv_info_lower_layer(x,y);
+    //  return &mv_spec_upsample;
+    //}
+    //else
+      return pb_info.get(x,y).mv;
   }
 
   void set_mv_info(int x,int y, int nPbW,int nPbH, const MotionVectorSpec& mv);
