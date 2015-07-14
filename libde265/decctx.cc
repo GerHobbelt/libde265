@@ -1713,7 +1713,6 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
         upsampling_params[c][9] = bitDepthCur;
       }
 
-      ilRefPic[ilRefPicIdx]->get_pixel_pointers_from(rlPic);
       ilRefPic[ilRefPicIdx]->set_inter_layer_upsampling_parameters(upsampling_params);
 
       if (currColourMappingEnableFlag) {
