@@ -276,57 +276,140 @@ void upsample_luma(const base_context* ctx,
              int ref_pic_height_in_luma_samples,
              int ref_BitDepth_Y,
              int nPbW, int nPbH, int bitDepth_L,
-             const int* upsampling_params)
+             const int* position_params)
 {  
-  ALIGNED_16(int16_t) mcbuffer[MAX_CU_SIZE * (MAX_CU_SIZE+7)];
-
-  // Get the x and y position in the reference picture
-
-
-  if (xP >= 0 && yP >= 0 &&
-      nPbW+xP <= ref_pic_width_in_luma_samples && nPbH+yP <= ref_pic_height_in_luma_samples) {
-    // The block to upsample is entirely within the picture (no clipping required)
-    //ctx->acceleration.put_hevc_qpel(out, out_stride,
-    //                                &ref[yP*ref_stride + xP],
-    //                                ref_stride /* sizeof(pixel_t)*/,
-    //                                nPbW,nPbH, mcbuffer, 0,0, bitDepth_L);
-    //ctx->acceleration.resampling_process_of_luma_sample_values()
+  // Calculate the block position (top left) and the size of the block in the reference (scaled)
+  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int nPbW_src = xP_right - xP_src;
+  int nPbH_src = yP_bottom - yP_src;
+  
+  if (xP_src >= 3 && yP_src >= 3 &&
+      xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
+    // The block to upsample is entirely within the reference picture (no clipping required)
+    ctx->acceleration.resample_block_luma(&ref[yP*ref_stride + xP], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
     
     // Upsample the block ref to mcbuffer
-    printf("Upsample Pos(%i,%i)\n", xP, yP);
+    //printf("Upsample Pos(%i,%i)\n", xP, yP);
   }
   else {
-    // We need to apply padding on the input samples
-
-    // Actually this depends on the upsampling filters that will be applied
-    int extra_left   = 4;
+    // We need to apply padding on the input samples. 
+    // !! The input samples are subsampled !!
+    int extra_left   = 3;
     int extra_right  = 4;
-    int extra_top    = 4;
+    int extra_top    = 3;
     int extra_bottom = 4;
 
-    pixel_t padbuf[(MAX_CU_SIZE+16)*(MAX_CU_SIZE+7)];
+    pixel_t padbuf[(MAX_CU_SIZE+7)*(MAX_CU_SIZE+16)];  // +7 would also work but this is better for sligned memory (SSE)
+    int pad_stride = MAX_CU_SIZE+16;
+    
+    // Apply padding in the padding buffer
+    for (int y=-extra_top;y<nPbH_src+extra_bottom;y++) {
+      for (int x=-extra_left;x<nPbW_src+extra_right;x++) {
 
-    const pixel_t* src_ptr;
-    int src_stride;
-    for (int y=-extra_top;y<nPbH+extra_bottom;y++) {
-      for (int x=-extra_left;x<nPbW+extra_right;x++) {
+        int xA = Clip3(0,ref_pic_width_in_luma_samples-1,x + xP_src);
+        int yA = Clip3(0,ref_pic_height_in_luma_samples-1,y + yP_src);
 
-        int xA = Clip3(0,ref_pic_width_in_luma_samples-1,x + xP);
-        int yA = Clip3(0,ref_pic_height_in_luma_samples-1,y + yP);
-
-        padbuf[x+extra_left + (y+extra_top)*(MAX_CU_SIZE+16)] = ref[ xA + yA*ref_stride ];
+        padbuf[x+extra_left + (y+extra_top)*pad_stride] = ref[ xA + yA*ref_stride ];
       }
     }
 
-    src_ptr = &padbuf[extra_top*(MAX_CU_SIZE+16) + extra_left];
-    src_stride = MAX_CU_SIZE+16;
-    
-    //ctx->acceleration.put_hevc_qpel(out, out_stride,
-    //                                src_ptr, src_stride /* sizeof(pixel_t) */,
-    //                                nPbW,nPbH, mcbuffer, xFracL,yFracL, bitDepth_L);
+    // Resample from the padding buffer to output
+    const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
+    ctx->acceleration.resample_block_luma(pad_ptr, pad_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
 
-    // Upsample the block src_ptr to mcbuffer
-    printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
+    //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
+
+    logtrace(LogMotion,"---V---\n");
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+        logtrace(LogMotion,"%04x ",out[x+y*out_stride]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+  }
+
+#ifdef DE265_LOG_TRACE
+    logtrace(LogMotion,"---MC luma %d %d = direct---\n",xFracL,yFracL);
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        int xA = Clip3(0,w-1,x + xP);
+        int yA = Clip3(0,h-1,y + yP);
+
+        logtrace(LogMotion,"%02x ", ref[ xA + yA*ref_stride ]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+
+    logtrace(LogMotion," -> \n");
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        logtrace(LogMotion,"%02x ",out[y*out_stride+x] >> 6); // 6 will be used when summing predictions
+      }
+      logtrace(LogMotion,"\n");
+    }
+#endif
+}
+
+template <class pixel_t>
+void upsample_chroma(const base_context* ctx,
+             int xP,int yP,
+             int16_t* out, int out_stride,
+             const pixel_t* ref, int ref_stride,
+             int ref_pic_width_in_chroma_samples,
+             int ref_pic_height_in_chroma_samples,
+             int ref_BitDepth_Y,
+             int nPbW, int nPbH, int bitDepth_C,
+             const int* position_params)
+{  
+   // Calculate the block position (top left) and the size of the block in the reference (scaled)
+  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int nPbW_src = xP_right - xP_src;
+  int nPbH_src = yP_bottom - yP_src;
+
+  if (xP_src >= 1 && yP_src >= 1 &&
+      xP_right+2 <= ref_pic_width_in_chroma_samples && yP_bottom+2 <= ref_pic_height_in_chroma_samples) {
+    // The block to upsample is entirely within the picture (no clipping required)
+    ctx->acceleration.resample_block_chroma(&ref[yP*ref_stride + xP], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+    
+    // Upsample the block ref to mcbuffer
+    //printf("C: Upsample Pos(%i,%i)\n", xP, yP);
+  }
+  else {
+    // We need to apply padding on the input samples
+    int extra_left   = 1;
+    int extra_right  = 2;
+    int extra_top    = 1;
+    int extra_bottom = 2;
+
+    pixel_t padbuf[((MAX_CU_SIZE/2)+3)*((MAX_CU_SIZE/2)+16)];  // +3 would also work but this is better for sligned memory (SSE)
+    int pad_stride = (MAX_CU_SIZE/2)+16;
+    
+    // Apply padding in the padding buffer
+    for (int y=-extra_top;y<nPbH_src+extra_bottom;y++) {
+      for (int x=-extra_left;x<nPbW_src+extra_right;x++) {
+
+        int xA = Clip3(0,ref_pic_width_in_chroma_samples-1,x + xP_src);
+        int yA = Clip3(0,ref_pic_height_in_chroma_samples-1,y + yP_src);
+
+        padbuf[x+extra_left + (y+extra_top)*pad_stride] = ref[ xA + yA*ref_stride ];
+      }
+    }
+
+    // Resample from the padding buffer to output
+    const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
+    ctx->acceleration.resample_block_chroma(pad_ptr, pad_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+
+    //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
 
     logtrace(LogMotion,"---V---\n");
     for (int y=0;y<nPbH;y++) {
@@ -479,7 +562,43 @@ void generate_inter_prediction_samples(base_context* ctx,
                     refPic->get_upsampling_parameters(false));
           }
 
-          // Chroma
+          // Upsample chroma
+          if (img->high_bit_depth(0)) {
+            upsample_chroma(ctx, xP, yP, predSamplesC[0][l],nCS,
+                    (const uint16_t*)refPic->get_il_refPic()->get_image_plane(1),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C,
+                    refPic->get_upsampling_parameters(true));
+            upsample_chroma(ctx, xP, yP, predSamplesC[1][l],nCS,
+                    (const uint16_t*)refPic->get_il_refPic()->get_image_plane(2),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C,
+                    refPic->get_upsampling_parameters(true));
+          }
+          else {
+            upsample_chroma(ctx, xP, yP, predSamplesC[0][l],nCS,
+                    (const uint8_t*)refPic->get_il_refPic()->get_image_plane(1),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C, 
+                    refPic->get_upsampling_parameters(true));
+            upsample_chroma(ctx, xP, yP, predSamplesC[1][l],nCS,
+                    (const uint8_t*)refPic->get_il_refPic()->get_image_plane(2),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C, 
+                    refPic->get_upsampling_parameters(true));
+          }
         }
         else {
           // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?

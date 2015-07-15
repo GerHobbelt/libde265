@@ -24,12 +24,28 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Scalability extensions - Inter layer upsampling process
+// Scalability extensions - Inter layer upsampling process for a whole image
 void resampling_process_of_luma_sample_values_fallback (uint8_t *src, ptrdiff_t srcstride, int src_size[2],
                                                         uint8_t *dst, ptrdiff_t dststride, int dst_size[2],
                                                         int position_params[10]);
 void resampling_process_of_chroma_sample_values_fallback (uint8_t *src, ptrdiff_t srcstride, int src_size[2],
                                                           uint8_t *dst, ptrdiff_t dststride, int dst_size[2],
                                                           int position_params[10]);
+
+// Inter layer upsampling for a block. The src pointer must already be padded if necessary.
+// (So src-4 and src-4*src_stride must be accessable)
+void resampling_process_of_luma_block_fallback_8bit (const uint8_t *src,  ptrdiff_t src_stride,
+                                                     int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                     int x, int y, const int *position_params);
+void resampling_process_of_luma_block_fallback_16bit (const uint16_t *src,  ptrdiff_t src_stride,
+                                                     int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                     int x, int y, const int *position_params);
+void resampling_process_of_chroma_block_fallback_8bit (const uint8_t *src,  ptrdiff_t src_stride,
+                                                       int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                       int x, int y, const int *position_params);
+void resampling_process_of_chroma_block_fallback_16bit (const uint16_t *src,  ptrdiff_t src_stride,
+                                                       int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                       int x, int y, const int *position_params);
+
 
 #endif

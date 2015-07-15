@@ -111,6 +111,12 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->hadamard_transform_8[3] = hadamard_32x32_8_fallback;
 
   // Scalability extensions - Inter layer upsampling process
+  
+  // Upsampling of entire pictures
   accel->resampling_process_of_luma_sample_values = resampling_process_of_luma_sample_values_fallback;
   accel->resampling_process_of_chroma_sample_values = resampling_process_of_chroma_sample_values_fallback;
+
+  // Upsampling of one block
+  accel->resampling_process_of_luma_block_8bit = resampling_process_of_luma_block_fallback_8bit;
+  accel->resampling_process_of_chroma_block_8bit = resampling_process_of_chroma_block_fallback_8bit;
 }

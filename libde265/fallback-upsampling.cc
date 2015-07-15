@@ -25,6 +25,8 @@
 #include "util.h"
 #include <assert.h>
 
+#define MAX_CU_SIZE 64
+
 // Use a faster implementation of the upsampling filter. 
 // 
 // USE_FASTER_IMPLEMENTATION == 0:
@@ -890,7 +892,242 @@ void resampling_process_of_chroma_sample_values_fallback( uint8_t *src, ptrdiff_
 #endif
 }
 
+// Upsample one block from src.
+// x_dst and y_dst give the position in the upsampled picture.
+void resampling_process_of_luma_block_fallback_8bit(
+  const uint8_t *src,  ptrdiff_t src_stride,
+  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+  int x_dst, int y_dst, const int *position_params)
+{
+  // Table H.1 – 16-phase luma resampling filter
+  static const int fL[16][8] = {  { 0, 0,   0, 64,  0,   0, 0,  0},
+                                  { 0, 1,  -3, 63,  4,  -2, 1,  0},
+                                  {-1, 2,  -5, 62,  8,  -3, 1,  0},
+                                  {-1, 3,  -8, 60, 13,  -4, 1,  0},
+                                  {-1, 4, -10, 58, 17,  -5, 1,  0},
+                                  {-1, 4, -11, 52, 26,  -8, 3, -1},
+                                  {-1, 3,  -9, 47, 31, -10, 4, -1},
+                                  {-1, 4, -11, 45, 34, -10, 4, -1},
+                                  {-1, 4, -11, 40, 40, -11, 4, -1},
+                                  {-1, 4, -10, 34, 45, -11, 4, -1},
+                                  {-1, 4, -10, 31, 47,  -9, 3, -1},
+                                  {-1, 3,  -8, 26, 52, -11, 4, -1},
+                                  { 0, 1,  -5, 17, 58, -10, 4, -1},
+                                  { 0, 1,  -4, 13, 60,  -8, 3, -1},
+                                  { 0, 1,  -3,  8, 62,  -5, 2, -1},
+                                  { 0, 1,  -2,  4, 63,  -3, 1,  0} };
 
+  // Temporal buffer for seperate horizontal/vertical upsampling
+  // 3 additional rows on the top, 4 at the bottom.
+  static int16_t s_tmp[(MAX_CU_SIZE+3+4)*MAX_CU_SIZE];
 
+  int BitDepthRefLayerY = position_params[8];
+  int BitDepthCurrY     = position_params[9];
+  int clipMax           = (1 << (BitDepthCurrY + 6)) - 1;
 
-  
+  // 4. The variables shift1, shift2 and offset are derived as follows:
+  int shift1 = BitDepthRefLayerY - 8;  // (H 33)
+  int shift2 = 14 - BitDepthCurrY;     // (H 34) (Original 20 - ... but scaling will be performed later)
+  int offset = 1 << (shift2 - 1);      // (H 35)
+
+  int xRef16, xRefBuf, xRef, xPhase, xP;
+  int yRef16, yRefBuf, yRef, yPhase, yP;
+  const uint8_t  *rlPicSampleL;
+  int16_t *rsLumaSample;
+  int16_t  *tmpSample;
+
+  // Calculate the position of the top left point in the reference
+  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+
+  // Horizontal filtering
+  for (int x=0; x < dst_width; x++) {
+    xP = x_dst + x;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    xRef16 = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2];  // (H 63)
+        
+    // 2. The variables xRef and xPhase are derived as follows:
+    xRef   = xRef16 >> 4;  // (H 29)
+    xPhase = xRef16 % 16;  // (H 30)
+    
+    // Get pointers to source and destination
+    rlPicSampleL = src - 3*src_stride;
+    tmpSample    = s_tmp;
+    xRefBuf = xRef - x_src;
+
+    for (int y = -3; y < dst_heigeht+4; y++) {
+      tmpSample[x] = (fL[xPhase][0] * rlPicSampleL[ xRefBuf - 3 ] +
+                      fL[xPhase][1] * rlPicSampleL[ xRefBuf - 2 ] +
+                      fL[xPhase][2] * rlPicSampleL[ xRefBuf - 1 ] +
+                      fL[xPhase][3] * rlPicSampleL[ xRefBuf     ] +
+                      fL[xPhase][4] * rlPicSampleL[ xRefBuf + 1 ] +
+                      fL[xPhase][5] * rlPicSampleL[ xRefBuf + 2 ] +
+                      fL[xPhase][6] * rlPicSampleL[ xRefBuf + 3 ] +
+                      fL[xPhase][7] * rlPicSampleL[ xRefBuf + 4 ] ) >> shift1; // (H 38)
+
+      // Go to the next y line
+      rlPicSampleL += src_stride;
+      tmpSample    += MAX_CU_SIZE;
+    }
+  }
+
+  // Vertical upsampling
+  int16_t *tmp_minus3, *tmp_minus2, *tmp_minus1, *tmp_center, *tmp_plus1, *tmp_plus2, *tmp_plus3, *tmp_plus4;
+  for (int y=0; y< dst_heigeht; y++) {
+    yP = y_dst + y;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    yRef16 = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3];  // (H 64)
+
+    // 3. The variables yRef and yPhase are derived as follows:
+    yPhase = yRef16 % 16;  // (H 32)
+    yRef   = yRef16 >> 4;  // (H 31)
+
+    yRefBuf = yRef - y_src;
+
+    // Get the pointers to the temp buffer for this yP
+    tmp_minus3 = s_tmp + (yRefBuf) * MAX_CU_SIZE;
+    tmp_minus2 = tmp_minus3 + MAX_CU_SIZE;
+    tmp_minus1 = tmp_minus2 + MAX_CU_SIZE;
+    tmp_center = tmp_minus1 + MAX_CU_SIZE;
+    tmp_plus1  = tmp_center + MAX_CU_SIZE;
+    tmp_plus2  = tmp_plus1  + MAX_CU_SIZE;
+    tmp_plus3  = tmp_plus2  + MAX_CU_SIZE;
+    tmp_plus4  = tmp_plus3  + MAX_CU_SIZE;
+    
+    // Get pointers to dest buffer
+    rsLumaSample = dst + y * dst_stride;  // Get pointer to destination y line
+
+    for (int x = 0; x < dst_width; x++) {
+      rsLumaSample[x] = Clip3( 0, clipMax,
+                              (( fL[yPhase][0] * tmp_minus3[ x ] +
+                                 fL[yPhase][1] * tmp_minus2[ x ] +
+                                 fL[yPhase][2] * tmp_minus1[ x ] +
+                                 fL[yPhase][3] * tmp_center[ x ] +
+                                 fL[yPhase][4] * tmp_plus1 [ x ] +
+                                 fL[yPhase][5] * tmp_plus2 [ x ] +
+                                 fL[yPhase][6] * tmp_plus3 [ x ] +
+                                 fL[yPhase][7] * tmp_plus4 [ x ] + offset ) >> shift2 ));  // (H 39)
+    }
+  }
+}
+
+// Upsample one block from src.
+// x_dst and y_dst give the position in the upsampled picture.
+void resampling_process_of_chroma_block_fallback_8bit(
+  const uint8_t *src,  ptrdiff_t src_stride,
+  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+  int x_dst, int y_dst, const int *position_params)
+{
+  // Table H.2 – 16-phase chroma resampling filter
+  static const int fC[16][4] = 
+                  { { 0, 64,  0,  0},
+                    {-2, 62,  4,  0},
+                    {-2, 58, 10, -2},
+                    {-4, 56, 14, -2},
+                    {-4, 54, 16, -2},
+                    {-6, 52, 20, -2},
+                    {-6, 46, 28, -4},
+                    {-4, 42, 30, -4},
+                    {-4, 36, 36, -4},
+                    {-4, 30, 42, -4},
+                    {-4, 28, 46, -6},
+                    {-2, 20, 52, -6},
+                    {-2, 16, 54, -4},
+                    {-2, 14, 56, -4},
+                    {-2, 10, 58, -2},
+                    { 0,  4, 62, -2} };
+
+  // Temporal buffer for seperate horizontal/vertical upsampling
+  // 1 additional rows on the top, 2 at the bottom.
+  static int16_t s_tmp[((MAX_CU_SIZE/2)+1+2)*(MAX_CU_SIZE/2)];
+
+  int BitDepthRefLayerC = position_params[8];
+  int BitDepthCurrC     = position_params[9];
+  int clipMax           = (1 << (BitDepthCurrC + 6)) - 1;
+
+  // 4. The variables shift1, shift2 and offset are derived as follows:
+  int shift1 = BitDepthRefLayerC - 8;  // (H 33)
+  int shift2 = 14 - BitDepthCurrC;     // (H 34) (Original 20 - ... but scaling will be performed later)
+  int offset = 1 << (shift2 - 1);      // (H 35)
+
+  int xRef16, xRefBuf, xRef, xPhase, xP;
+  int yRef16, yRefBuf, yRef, yPhase, yP;
+  const uint8_t  *rlPicSampleC;
+  int16_t *rsChromaSample;
+  int16_t  *tmpSample;
+
+  // Calculate the position of the top left point in the reference
+  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+
+  // Horizontal filtering
+  for (int x=0; x < dst_width; x++) {
+    xP = x_dst + x;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    xRef16 = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2];  // (H 63)
+        
+    // 2. The variables xRef and xPhase are derived as follows:
+    xRef   = xRef16 >> 4;  // (H 29)
+    xPhase = xRef16 % 16;  // (H 30)
+    
+    // Get pointers to source and destination
+    rlPicSampleC = src - (1*src_stride);
+    tmpSample    = s_tmp;
+    xRefBuf = xRef - x_src;
+
+    for (int y = -1; y < dst_heigeht+2; y++) {
+      tmpSample[xP] = (fC[xPhase][0] * rlPicSampleC[ xRefBuf - 1 ] +
+                       fC[xPhase][1] * rlPicSampleC[ xRefBuf     ] +
+                       fC[xPhase][2] * rlPicSampleC[ xRefBuf + 1 ] +
+                       fC[xPhase][3] * rlPicSampleC[ xRefBuf + 2 ] ) >> shift1; // (H 50)
+
+      // Go to the next y line
+      rlPicSampleC += src_stride;
+      tmpSample    += (MAX_CU_SIZE/2);
+    }
+  }
+
+  // Vertical upsampling
+  int16_t *tmp_minus1, *tmp_center, *tmp_plus1, *tmp_plus2;
+  for (int y=0; y< dst_heigeht; y++) {
+    yP = y_dst + y;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    yRef16 = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3];  // (H 64)
+
+    // 3. The variables yRef and yPhase are derived as follows:
+    //yPhase = yRef16 % 16;  // (H 32)
+    yPhase = yRef16 & 15;  // This is what the reference software does. TODO: Double check with the latest standard.
+    yRef   = yRef16 >> 4;  // (H 31)
+
+    // Get the pointers to the temp buffer for this yP
+    yRefBuf = yRef - y_src;
+    tmp_minus1 = s_tmp + yRefBuf * (MAX_CU_SIZE/2);
+    tmp_center = tmp_minus1  + (MAX_CU_SIZE/2);
+    tmp_plus1  = tmp_center  + (MAX_CU_SIZE/2);
+    tmp_plus2  = tmp_plus1   + (MAX_CU_SIZE/2);
+
+    // Get pointers to dest buffer
+    rsChromaSample = dst + yP * dst_stride;  // Get pointer to destination y line
+    
+    for (int x = 0; x < dst_width; x++) {
+      rsChromaSample[x] = Clip3( 0, clipMax,
+                         (( fC[yPhase][0] * tmp_minus1[ x ] +
+                            fC[yPhase][1] * tmp_center[ x ] +
+                            fC[yPhase][2] * tmp_plus1 [ x ] +
+                            fC[yPhase][3] * tmp_plus2 [ x ] + offset ) >> shift2 ));  // (H 51)
+    }
+  }
+}
+
