@@ -375,6 +375,7 @@ public:
   const bool getEqualPictureSizeAndOffsetFlag() const { return equalPictureSizeAndOffsetFlag; }
 
   const de265_image* get_il_refPic() const { return ilRefPic; };
+  const int *get_upsampling_parameters(bool bChroma) const { return bChroma ? il_upsampling_parameters[1] : il_upsampling_parameters[0]; }
   
   //// Upsample the image from the source using the given upsampling parameters
   //void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
