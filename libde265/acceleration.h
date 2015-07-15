@@ -81,43 +81,52 @@ struct acceleration_functions
 
 
 
-
+  // 8bit. Eigth pel precision. No filtering required.
   void (*put_hevc_epel_8)(int16_t *dst, ptrdiff_t dststride,
                           const uint8_t *src, ptrdiff_t srcstride, int width, int height,
                           int mx, int my, int16_t* mcbuffer);
+  // 8bit. Eigth pel precision. Only horizontal filtering required
   void (*put_hevc_epel_h_8)(int16_t *dst, ptrdiff_t dststride,
                             const uint8_t *src, ptrdiff_t srcstride, int width, int height,
                             int mx, int my, int16_t* mcbuffer, int bit_depth);
+  // 8bit. Eigth pel precision. Only vertical filtering required
   void (*put_hevc_epel_v_8)(int16_t *dst, ptrdiff_t dststride,
                             const uint8_t *src, ptrdiff_t srcstride, int width, int height,
                             int mx, int my, int16_t* mcbuffer, int bit_depth);
+  // 8bit. Eigth pel precision. Horizontal and vertical filtering required.
   void (*put_hevc_epel_hv_8)(int16_t *dst, ptrdiff_t dststride,
                              const uint8_t *src, ptrdiff_t srcstride, int width, int height,
                              int mx, int my, int16_t* mcbuffer, int bit_depth);
 
+  // 8bit. Quarter precision precision. Index specifies quarter pel shift in x and y direction. (0,0) -> no filtering required.
   void (*put_hevc_qpel_8[4][4])(int16_t *dst, ptrdiff_t dststride,
                                 const uint8_t *src, ptrdiff_t srcstride, int width, int height,
                                 int16_t* mcbuffer);
 
-
+  // 16bit. Eigth pel precision. No filtering required.
   void (*put_hevc_epel_16)(int16_t *dst, ptrdiff_t dststride,
                            const uint16_t *src, ptrdiff_t srcstride, int width, int height,
                            int mx, int my, int16_t* mcbuffer, int bit_depth);
+  // 16bit. Eigth pel precision. Only horizontal filtering required
   void (*put_hevc_epel_h_16)(int16_t *dst, ptrdiff_t dststride,
                              const uint16_t *src, ptrdiff_t srcstride, int width, int height,
                             int mx, int my, int16_t* mcbuffer, int bit_depth);
+  // 16bit. Eigth pel precision. Only vertical filtering required
   void (*put_hevc_epel_v_16)(int16_t *dst, ptrdiff_t dststride,
                              const uint16_t *src, ptrdiff_t srcstride, int width, int height,
                              int mx, int my, int16_t* mcbuffer, int bit_depth);
+  // 16bit. Eigth pel precision. Horizontal and vertical filtering required.
   void (*put_hevc_epel_hv_16)(int16_t *dst, ptrdiff_t dststride,
                               const uint16_t *src, ptrdiff_t srcstride, int width, int height,
                               int mx, int my, int16_t* mcbuffer, int bit_depth);
 
+  // 16bit. Quarter precision precision. Index specifies quarter pel shift in x and y direction. (0,0) -> no filtering required.
   void (*put_hevc_qpel_16[4][4])(int16_t *dst, ptrdiff_t dststride,
                                  const uint16_t *src, ptrdiff_t srcstride, int width, int height,
                                  int16_t* mcbuffer, int bit_depth);
 
 
+  // Call the correct version of the functions above (according to bit_depth)
   void put_hevc_epel(int16_t *dst, ptrdiff_t dststride,
                      const void *src, ptrdiff_t srcstride, int width, int height,
                      int mx, int my, int16_t* mcbuffer, int bit_depth) const;
@@ -131,6 +140,7 @@ struct acceleration_functions
                         const void *src, ptrdiff_t srcstride, int width, int height,
                         int mx, int my, int16_t* mcbuffer, int bit_depth) const;
 
+  // Call the correct version of the functions above (according to bit_depth and quarter pel shift)
   void put_hevc_qpel(int16_t *dst, ptrdiff_t dststride,
                      const void *src, ptrdiff_t srcstride, int width, int height,
                      int16_t* mcbuffer, int dX,int dY, int bit_depth) const;
