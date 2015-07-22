@@ -289,7 +289,7 @@ void upsample_luma(const base_context* ctx,
   if (xP_src >= 3 && yP_src >= 3 &&
       xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
     // The block to upsample is entirely within the reference picture (no clipping required)
-    ctx->acceleration.resample_block_luma(&ref[yP*ref_stride + xP], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
+    ctx->acceleration.resample_block_luma(&ref[yP_src*ref_stride + xP_src], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
     
     // Upsample the block ref to mcbuffer
     //printf("Upsample Pos(%i,%i)\n", xP, yP);
@@ -379,7 +379,7 @@ void upsample_chroma(const base_context* ctx,
   if (xP_src >= 1 && yP_src >= 1 &&
       xP_right+2 <= ref_pic_width_in_chroma_samples && yP_bottom+2 <= ref_pic_height_in_chroma_samples) {
     // The block to upsample is entirely within the picture (no clipping required)
-    ctx->acceleration.resample_block_chroma(&ref[yP*ref_stride + xP], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+    ctx->acceleration.resample_block_chroma(&ref[yP_src*ref_stride + xP_src], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
     
     // Upsample the block ref to mcbuffer
     //printf("C: Upsample Pos(%i,%i)\n", xP, yP);

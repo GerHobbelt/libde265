@@ -1085,10 +1085,10 @@ void resampling_process_of_chroma_block_fallback_8bit(
     xRefBuf = xRef - x_src;
 
     for (int y = -1; y < dst_heigeht+2; y++) {
-      tmpSample[xP] = (fC[xPhase][0] * rlPicSampleC[ xRefBuf - 1 ] +
-                       fC[xPhase][1] * rlPicSampleC[ xRefBuf     ] +
-                       fC[xPhase][2] * rlPicSampleC[ xRefBuf + 1 ] +
-                       fC[xPhase][3] * rlPicSampleC[ xRefBuf + 2 ] ) >> shift1; // (H 50)
+      tmpSample[x] = (fC[xPhase][0] * rlPicSampleC[ xRefBuf - 1 ] +
+                      fC[xPhase][1] * rlPicSampleC[ xRefBuf     ] +
+                      fC[xPhase][2] * rlPicSampleC[ xRefBuf + 1 ] +
+                      fC[xPhase][3] * rlPicSampleC[ xRefBuf + 2 ] ) >> shift1; // (H 50)
 
       // Go to the next y line
       rlPicSampleC += src_stride;
@@ -1119,7 +1119,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
     tmp_plus2  = tmp_plus1   + (MAX_CU_SIZE/2);
 
     // Get pointers to dest buffer
-    rsChromaSample = dst + yP * dst_stride;  // Get pointer to destination y line
+    rsChromaSample = dst + y * dst_stride;  // Get pointer to destination y line
     
     for (int x = 0; x < dst_width; x++) {
       rsChromaSample[x] = Clip3( 0, clipMax,
