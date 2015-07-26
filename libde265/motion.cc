@@ -368,11 +368,15 @@ void upsample_chroma(const base_context* ctx,
              int nPbW, int nPbH, int bitDepth_C,
              const int* position_params)
 {  
+  xP = xP / 2;
+  yP = yP / 2;
+
    // Calculate the block position (top left) and the size of the block in the reference (scaled)
   int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
   int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
   int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
   int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+
   int nPbW_src = xP_right - xP_src;
   int nPbH_src = yP_bottom - yP_src;
 
@@ -385,7 +389,8 @@ void upsample_chroma(const base_context* ctx,
     //printf("C: Upsample Pos(%i,%i)\n", xP, yP);
   }
   else {
-    // We need to apply padding on the input samples
+    // We need to apply padding on the input samples. 
+    // !! The input samples are subsampled !!
     int extra_left   = 1;
     int extra_right  = 2;
     int extra_top    = 1;
@@ -394,12 +399,11 @@ void upsample_chroma(const base_context* ctx,
     pixel_t padbuf[((MAX_CU_SIZE/2)+3)*((MAX_CU_SIZE/2)+16)];  // +3 would also work but this is better for sligned memory (SSE)
     int pad_stride = (MAX_CU_SIZE/2)+16;
     
-    // Apply padding in the padding buffer
-    for (int y=-extra_top;y<nPbH_src+extra_bottom;y++) {
-      for (int x=-extra_left;x<nPbW_src+extra_right;x++) {
-
+    for (int y=-extra_top;y<=nPbH_src+extra_bottom;y++) {
+      int yA = Clip3(0,ref_pic_height_in_chroma_samples-1,y + yP_src);
+      
+      for (int x=-extra_left;x<=nPbW_src+extra_right;x++) {
         int xA = Clip3(0,ref_pic_width_in_chroma_samples-1,x + xP_src);
-        int yA = Clip3(0,ref_pic_height_in_chroma_samples-1,y + yP_src);
 
         padbuf[x+extra_left + (y+extra_top)*pad_stride] = ref[ xA + yA*ref_stride ];
       }
@@ -563,7 +567,7 @@ void generate_inter_prediction_samples(base_context* ctx,
           }
 
           // Upsample chroma
-          if (img->high_bit_depth(0)) {
+          if (img->high_bit_depth(1)) {
             upsample_chroma(ctx, xP, yP, predSamplesC[0][l],nCS,
                     (const uint16_t*)refPic->get_il_refPic()->get_image_plane(1),
                     refPic->get_il_refPic()->get_chroma_stride(),
@@ -616,7 +620,7 @@ void generate_inter_prediction_samples(base_context* ctx,
                     refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
           }
 
-          if (img->high_bit_depth(0)) {
+          if (img->high_bit_depth(1)) {
             mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                       predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
                       refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
@@ -656,6 +660,7 @@ void generate_inter_prediction_samples(base_context* ctx,
                                               predSamplesC[0][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
         ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
                                               predSamplesC[1][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
+        
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);

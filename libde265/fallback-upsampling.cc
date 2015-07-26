@@ -894,6 +894,7 @@ void resampling_process_of_chroma_sample_values_fallback( uint8_t *src, ptrdiff_
 
 // Upsample one block from src.
 // x_dst and y_dst give the position in the upsampled picture.
+// Output is scaled by 64 (6 bits)
 void resampling_process_of_luma_block_fallback_8bit(
   const uint8_t *src,  ptrdiff_t src_stride,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
@@ -923,11 +924,11 @@ void resampling_process_of_luma_block_fallback_8bit(
 
   int BitDepthRefLayerY = position_params[8];
   int BitDepthCurrY     = position_params[9];
-  int clipMax           = (1 << (BitDepthCurrY + 6)) - 1;
+  int clipMax           = (1 << (BitDepthCurrY)) - 1;
 
   // 4. The variables shift1, shift2 and offset are derived as follows:
   int shift1 = BitDepthRefLayerY - 8;  // (H 33)
-  int shift2 = 14 - BitDepthCurrY;     // (H 34) (Original 20 - ... but scaling will be performed later)
+  int shift2 = 20 - BitDepthCurrY;     // (H 34)
   int offset = 1 << (shift2 - 1);      // (H 35)
 
   int xRef16, xRefBuf, xRef, xPhase, xP;
@@ -1013,12 +1014,15 @@ void resampling_process_of_luma_block_fallback_8bit(
                                  fL[yPhase][5] * tmp_plus2 [ x ] +
                                  fL[yPhase][6] * tmp_plus3 [ x ] +
                                  fL[yPhase][7] * tmp_plus4 [ x ] + offset ) >> shift2 ));  // (H 39)
+      
+      rsLumaSample[x] = rsLumaSample[x] << 6; // Scale output by 6 bits
     }
   }
 }
 
 // Upsample one block from src.
 // x_dst and y_dst give the position in the upsampled picture.
+// Output is scaled by 64 (6 bits)
 void resampling_process_of_chroma_block_fallback_8bit(
   const uint8_t *src,  ptrdiff_t src_stride,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
@@ -1049,11 +1053,11 @@ void resampling_process_of_chroma_block_fallback_8bit(
 
   int BitDepthRefLayerC = position_params[8];
   int BitDepthCurrC     = position_params[9];
-  int clipMax           = (1 << (BitDepthCurrC + 6)) - 1;
+  int clipMax           = (1 << (BitDepthCurrC)) - 1;
 
   // 4. The variables shift1, shift2 and offset are derived as follows:
   int shift1 = BitDepthRefLayerC - 8;  // (H 33)
-  int shift2 = 14 - BitDepthCurrC;     // (H 34) (Original 20 - ... but scaling will be performed later)
+  int shift2 = 20 - BitDepthCurrC;     // (H 34)
   int offset = 1 << (shift2 - 1);      // (H 35)
 
   int xRef16, xRefBuf, xRef, xPhase, xP;
@@ -1127,6 +1131,8 @@ void resampling_process_of_chroma_block_fallback_8bit(
                             fC[yPhase][1] * tmp_center[ x ] +
                             fC[yPhase][2] * tmp_plus1 [ x ] +
                             fC[yPhase][3] * tmp_plus2 [ x ] + offset ) >> shift2 ));  // (H 51)
+
+      rsChromaSample[x] = rsChromaSample[x] << 6; // Scale output by 6 bits
     }
   }
 }
