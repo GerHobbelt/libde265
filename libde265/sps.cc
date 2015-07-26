@@ -22,6 +22,7 @@
 #include "util.h"
 #include "scan.h"
 #include "decctx.h"
+#include "decctx-multilayer.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -29,7 +30,7 @@
 
 #define READ_VLC_OFFSET(variable, vlctype, offset)   \
   if ((vlc = get_ ## vlctype(br)) == UVLC_ERROR) {   \
-    ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);  \
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);  \
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; \
   } \
   variable = vlc + offset;
@@ -46,7 +47,7 @@ static int SubHeightC_tab[] = { -1,2,1,1 };
 
 
 // TODO: should be in some header-file of refpic.c
-extern bool read_short_term_ref_pic_set(decoder_context* ctx,
+extern bool read_short_term_ref_pic_set(error_queue* errqueue,
                                         const seq_parameter_set* sps,
                                         bitreader* br,
                                         ref_pic_set* out_set,
@@ -54,10 +55,20 @@ extern bool read_short_term_ref_pic_set(decoder_context* ctx,
                                         const std::vector<ref_pic_set>& sets,
                                         bool sliceRefPicSet);
 
+extern bool write_short_term_ref_pic_set(error_queue* errqueue,
+                                         const seq_parameter_set* sps,
+                                         CABAC_encoder& out,
+                                         const ref_pic_set* in_set, // which set to write
+                                         int idxRps,  // index of the set to be read
+                                         const std::vector<ref_pic_set>& sets, // previously read sets
+                                         bool sliceRefPicSet); // is this in the slice header?
+
+
 seq_parameter_set::seq_parameter_set()
 {
   // TODO: this is dangerous
   //memset(this,0,sizeof(seq_parameter_set));
+  ChromaArrayType = 0;
 
   sps_read = false;
   //ref_pic_sets = NULL;
@@ -70,134 +81,325 @@ seq_parameter_set::~seq_parameter_set()
 }
 
 
+void seq_parameter_set::set_defaults(enum PresetSet)
+{
+  video_parameter_set_id = 0;
+  sps_max_sub_layers = 1;
+  sps_ext_or_max_sub_layers_minus1 = 0;
+  sps_temporal_id_nesting_flag = 1;
+
+  profile_tier_level_.general.set_defaults(Profile_Main, 6,2); // TODO
+
+  seq_parameter_set_id = 0;
+  chroma_format_idc = 1;
+  ChromaArrayType = chroma_format_idc;
+
+  separate_colour_plane_flag = 0;
+  pic_width_in_luma_samples = 0;
+  pic_height_in_luma_samples = 0;
+  conformance_window_flag = 0;
+
+  conf_win_left_offset   = 0;
+  conf_win_right_offset  = 0;
+  conf_win_top_offset    = 0;
+  conf_win_bottom_offset = 0;
+
+  bit_depth_luma  =8;
+  bit_depth_chroma=8;
+
+  log2_max_pic_order_cnt_lsb = 8;
+  sps_sub_layer_ordering_info_present_flag = 0;
+
+  sps_max_dec_pic_buffering[0] = 1;
+  sps_max_num_reorder_pics[0]  = 0;
+  sps_max_latency_increase_plus1[0] = 0;
+
+  set_CB_log2size_range(4,4);
+  set_TB_log2size_range(3,4);
+  max_transform_hierarchy_depth_inter = 1;
+  max_transform_hierarchy_depth_intra = 1;
+
+  scaling_list_enable_flag = 0;
+  sps_scaling_list_data_present_flag = 0;
+
+  // TODO struct scaling_list_data scaling_list;
+
+  amp_enabled_flag = 0;
+  sample_adaptive_offset_enabled_flag = 0;
+  pcm_enabled_flag = 0;
+
+  pcm_sample_bit_depth_luma = 8;
+  pcm_sample_bit_depth_chroma = 8;
+  // TODO log2_min_pcm_luma_coding_block_size;
+  // TODO log2_diff_max_min_pcm_luma_coding_block_size;
+  pcm_loop_filter_disable_flag = 1;
+
+  // num_short_term_ref_pic_sets = 0;
+  // std::vector<ref_pic_set> ref_pic_sets; // [0 ; num_short_term_ref_pic_set (<=MAX_REF_PIC_SETS) )
+  ref_pic_sets.clear();
+
+  long_term_ref_pics_present_flag = 0;
+
+  num_long_term_ref_pics_sps = 0;
+
+  /* TODO
+  int  lt_ref_pic_poc_lsb_sps[MAX_NUM_LT_REF_PICS_SPS];
+  char used_by_curr_pic_lt_sps_flag[MAX_NUM_LT_REF_PICS_SPS];
+  */
+
+  sps_temporal_mvp_enabled_flag = 0;
+  strong_intra_smoothing_enable_flag = 0;
+  vui_parameters_present_flag = 0;
+
+  /*
+    if( vui_parameters_present_flag )
+      vui_parameters()
+  */
+
+  sps_range_extension_flag = false;
+  sps_multilayer_extension_flag = false;
+  sps_extension_6bits = 0;
+}
+
+
+void seq_parameter_set::set_CB_log2size_range(int mini,int maxi)
+{
+  log2_min_luma_coding_block_size = mini;
+  log2_diff_max_min_luma_coding_block_size = maxi-mini;
+}
+
+
+void seq_parameter_set::set_TB_log2size_range(int mini,int maxi)
+{
+  log2_min_transform_block_size = mini;
+  log2_diff_max_min_transform_block_size = maxi-mini;
+}
+
+
+void seq_parameter_set::set_resolution(int w,int h)
+{
+  pic_width_in_luma_samples  = w;
+  pic_height_in_luma_samples = h;
+}
+
+
 de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 {
   int vlc;
+  error_queue* errqueue = ctx;
 
   video_parameter_set_id = get_bits(br,4);
-  sps_max_sub_layers     = get_bits(br,3) +1;
-  if (sps_max_sub_layers>7) {
-    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  
+  int nuh_layer_id = ctx->get_layer_id();
+  if (nuh_layer_id == 0) {
+    sps_max_sub_layers = get_bits(br,3) + 1;
+    if (sps_max_sub_layers>7) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+  else {
+    sps_ext_or_max_sub_layers_minus1 = get_bits(br,3);
+    
+    // Standard F.7.4.3.2.1 (JCTVC-R1013_v6)
+    // When not present, the value of sps_max_sub_layers_minus1 is inferred to be equal to ( sps_ext_or_max_sub_layers_minus1  = =  7 ) ? vps_max_sub_layers_minus1 : sps_ext_or_max_sub_layers_minus1.
+    if (sps_ext_or_max_sub_layers_minus1 == 7) {
+      // Get the VPS
+      video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+
+      sps_max_sub_layers = vps->vps_max_sub_layers;
+    } 
+    else {
+      sps_max_sub_layers = sps_ext_or_max_sub_layers_minus1 + 1;
+    }
   }
 
-  sps_temporal_id_nesting_flag = get_bits(br,1);
+  // Annex F (multilayer extensions)
+  bool MultiLayerExtSpsFlag = ( nuh_layer_id !=  0 && sps_ext_or_max_sub_layers_minus1 == 7 );
 
-  read_profile_tier_level(br,&profile_tier_level, sps_max_sub_layers);
+  if (!MultiLayerExtSpsFlag) {
+    sps_temporal_id_nesting_flag = get_bits(br,1);
+    ptl.read(br, true, sps_max_sub_layers);
+  }
 
   READ_VLC(seq_parameter_set_id, uvlc);
   if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
+  if (MultiLayerExtSpsFlag) {
+    // Infer picture size / color information from the VPS extension
+    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    video_parameter_set_extension *vps_ext = &vps->vps_extension;
+    int repFormatIdx;
 
-  // --- decode chroma type ---
-
-  READ_VLC(chroma_format_idc, uvlc);
-
-  if (chroma_format_idc == 3) {
-    separate_colour_plane_flag = get_bits(br,1);
+    update_rep_format_flag = get_bits(br,1);
+    if (update_rep_format_flag) {
+      sps_rep_format_idx = get_bits(br,8);
+      repFormatIdx = sps_rep_format_idx;
+    }
+    else {
+      repFormatIdx = vps_ext->vps_rep_format_idx[vps_ext->LayerIdxInVps[ ctx->get_layer_id() ]];
+    }
+    
+    if (repFormatIdx > vps_ext->vps_num_rep_formats_minus1) {
+      // repFormatIdx out of range
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    
+    // Infer values from VPS
+    rep_format rep = vps_ext->vps_ext_rep_format[repFormatIdx];
+    chroma_format_idc = rep.chroma_format_vps_idc;
+    separate_colour_plane_flag = rep.separate_colour_plane_vps_flag;
+    pic_width_in_luma_samples  = rep.pic_width_vps_in_luma_samples;
+    pic_height_in_luma_samples = rep.pic_height_vps_in_luma_samples;
+    bit_depth_luma   = rep.bit_depth_vps_luma_minus8 + 8;
+    bit_depth_chroma = rep.bit_depth_vps_chroma_minus8 + 8;
+    
+    // Infer conformance window from VPS
+    conformance_window conf = rep.m_conformanceWindowVps;
+    conf_win_left_offset = conf.conf_win_vps_left_offset;
+    conf_win_right_offset = conf.conf_win_vps_right_offset;
+    conf_win_top_offset = conf.conf_win_vps_top_offset;
+    conf_win_bottom_offset = conf.conf_win_vps_top_offset;
   }
   else {
-    separate_colour_plane_flag = 0;
+    // --- decode chroma type ---
+
+    READ_VLC(chroma_format_idc, uvlc);
+
+    if (chroma_format_idc == 3) {
+      separate_colour_plane_flag = get_bits(br,1);
+    }
+    else {
+      separate_colour_plane_flag = 0;
+    }
+
+    if (separate_colour_plane_flag) {
+      ChromaArrayType = 0;
+    }
+    else {
+      ChromaArrayType = chroma_format_idc;
+    }
+
+    if (chroma_format_idc<0 ||
+        chroma_format_idc>3) {
+      errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    if (chroma_format_idc != 1) {
+      return DE265_ERROR_NOT_IMPLEMENTED_YET;
+    }
+
+
+    // --- picture size ---
+
+    READ_VLC(pic_width_in_luma_samples,  uvlc);
+    READ_VLC(pic_height_in_luma_samples, uvlc);
+
+    if (pic_width_in_luma_samples  == 0 ||
+        pic_height_in_luma_samples == 0) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    if (pic_width_in_luma_samples > MAX_PICTURE_WIDTH ||
+        pic_height_in_luma_samples> MAX_PICTURE_HEIGHT) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    conformance_window_flag = get_bits(br,1);
+
+    if (conformance_window_flag) {
+      READ_VLC(conf_win_left_offset,  uvlc);
+      READ_VLC(conf_win_right_offset, uvlc);
+      READ_VLC(conf_win_top_offset,   uvlc);
+      READ_VLC(conf_win_bottom_offset,uvlc);
+    }
+    else {
+      conf_win_left_offset  = 0;
+      conf_win_right_offset = 0;
+      conf_win_top_offset   = 0;
+      conf_win_bottom_offset= 0;
+    }
+
+    READ_VLC_OFFSET(bit_depth_luma,  uvlc, 8);  // bit_depth_luma_minus8
+    READ_VLC_OFFSET(bit_depth_chroma,uvlc, 8);  // bit_depth_chroma_minus8
   }
-
-  if (separate_colour_plane_flag) {
-    ChromaArrayType = 0;
-  }
-  else {
-    ChromaArrayType = chroma_format_idc;
-  }
-
-  if (chroma_format_idc<0 ||
-      chroma_format_idc>3) {
-    ctx->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
-    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
-  }
-
-  SubWidthC  = SubWidthC_tab [chroma_format_idc];
-  SubHeightC = SubHeightC_tab[chroma_format_idc];
-
-
-  // --- picture size ---
-
-  READ_VLC(pic_width_in_luma_samples,  uvlc);
-  READ_VLC(pic_height_in_luma_samples, uvlc);
-
-  conformance_window_flag = get_bits(br,1);
-
-  if (conformance_window_flag) {
-    READ_VLC(conf_win_left_offset,  uvlc);
-    READ_VLC(conf_win_right_offset, uvlc);
-    READ_VLC(conf_win_top_offset,   uvlc);
-    READ_VLC(conf_win_bottom_offset,uvlc);
-  }
-  else {
-    conf_win_left_offset  = 0;
-    conf_win_right_offset = 0;
-    conf_win_top_offset   = 0;
-    conf_win_bottom_offset= 0;
-  }
-
-  if (ChromaArrayType==0) {
-    WinUnitX = 1;
-    WinUnitY = 1;
-  }
-  else {
-    WinUnitX = SubWidthC_tab [chroma_format_idc];
-    WinUnitY = SubHeightC_tab[chroma_format_idc];
-  }
-
-
-  READ_VLC_OFFSET(bit_depth_luma,  uvlc, 8);
-  READ_VLC_OFFSET(bit_depth_chroma,uvlc, 8);
 
   READ_VLC_OFFSET(log2_max_pic_order_cnt_lsb, uvlc, 4);
   MaxPicOrderCntLsb = 1<<(log2_max_pic_order_cnt_lsb);
 
+  sps_max_dec_pic_buffering[0] = 1;
+  sps_max_num_reorder_pics[0]  = 0;
+  sps_max_latency_increase_plus1[0] = 0;
+  if (!MultiLayerExtSpsFlag) {
+    // --- sub_layer_ordering_info ---
 
-  // --- sub_layer_ordering_info ---
+    sps_sub_layer_ordering_info_present_flag = get_bits(br,1);
 
-  sps_sub_layer_ordering_info_present_flag = get_bits(br,1);
+    int firstLayer = (sps_sub_layer_ordering_info_present_flag ?
+                      0 : sps_max_sub_layers-1 );
 
-  int firstLayer = (sps_sub_layer_ordering_info_present_flag ?
-                    0 : sps_max_sub_layers-1 );
+    for (int i=firstLayer ; i <= sps_max_sub_layers-1; i++ ) {
 
-  for (int i=firstLayer ; i <= sps_max_sub_layers-1; i++ ) {
+      // sps_max_dec_pic_buffering[i]
 
-    // sps_max_dec_pic_buffering[i]
+      vlc=get_uvlc(br);
+      if (vlc == UVLC_ERROR ||
+          vlc+1 > MAX_NUM_REF_PICS) {
+        errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
 
-    vlc=get_uvlc(br);
-    if (vlc == UVLC_ERROR ||
-        vlc+1 > MAX_NUM_REF_PICS) {
-      ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
-      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      sps_max_dec_pic_buffering[i] = vlc+1;
+
+      // sps_max_num_reorder_pics[i]
+
+      READ_VLC(sps_max_num_reorder_pics[i], uvlc);
+
+
+      // sps_max_latency_increase[i]
+
+      READ_VLC(sps_max_latency_increase_plus1[i], uvlc);
+
+      SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
+                                  sps_max_latency_increase_plus1[i]-1);
     }
 
-    sps_max_dec_pic_buffering[i] = vlc+1;
+    // copy info to all layers if only specified once
 
-    // sps_max_num_reorder_pics[i]
+    if (sps_sub_layer_ordering_info_present_flag) {
+      int ref = sps_max_sub_layers-1;
+      assert(ref<7);
 
-    READ_VLC(sps_max_num_reorder_pics[i], uvlc);
-
-
-    // sps_max_latency_increase[i]
-
-    READ_VLC(sps_max_latency_increase_plus1[i], uvlc);
-
-    SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
-                                sps_max_latency_increase_plus1[i]-1);
+      for (int i=0 ; i < sps_max_sub_layers-1; i++ ) {
+        sps_max_dec_pic_buffering[i] = sps_max_dec_pic_buffering[ref];
+        sps_max_num_reorder_pics[i]  = sps_max_num_reorder_pics[ref];
+        sps_max_latency_increase_plus1[i]  = sps_max_latency_increase_plus1[ref];
+      }
+    }
   }
+  else {
+    // Standard F.7.4.3.2.1 JCTVC-R1013_v6
+    // 	When sps_max_dec_pic_buffering_minus1[ i ] is not present for i in the range of 0 to sps_max_sub_layers_minus1, inclusive, due to MultiLayerExtSpsFlag being equal to 1, for a layer that refers to the SPS and has nuh_layer_id equal to currLayerId, the value of sps_max_dec_pic_buffering_minus1[ i ] is inferred to be equal to max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] of the active VPS, where layerIdx is equal to the value such that LayerSetLayerIdList[ TargetDecLayerSetIdx ][ layerIdx ] is equal to currLayerId.
+    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    video_parameter_set_extension* vps_ext = &vps->vps_extension;
+   
+    int TargetOlsIdx = ctx->get_multi_layer_decoder()->get_target_ols_idx();
+    for (int i=0 ; i <= sps_max_sub_layers-1; i++ ) {
+      int TargetDecLayerSetIdx = vps_ext->OlsIdxToLsIdx[ TargetOlsIdx ];
+      int curLayerID = ctx->get_layer_id();
+      int layerIdx = -1;
+      for (int i = 0; i<vps_ext->NumLayersInIdList[TargetDecLayerSetIdx]; i++) {
+        if (vps_ext->LayerSetLayerIdList[TargetDecLayerSetIdx][i] == curLayerID) {
+          layerIdx = i;
+          break;
+        }
+      }
 
-  // copy info to all layers if only specified once
-
-  if (sps_sub_layer_ordering_info_present_flag) {
-    int ref = sps_max_sub_layers-1;
-    assert(ref<7);
-
-    for (int i=0 ; i < sps_max_sub_layers-1; i++ ) {
-      sps_max_dec_pic_buffering[i] = sps_max_dec_pic_buffering[ref];
-      sps_max_num_reorder_pics[i]  = sps_max_num_reorder_pics[ref];
-      sps_max_latency_increase_plus1[i]  = sps_max_latency_increase_plus1[ref];
+      if (layerIdx != -1) {
+        sps_max_dec_pic_buffering[i] = vps_ext->dpb_size_table.max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] + 1;
+      }
     }
   }
 
@@ -208,6 +410,12 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   READ_VLC(log2_diff_max_min_transform_block_size, uvlc);
   READ_VLC(max_transform_hierarchy_depth_inter, uvlc);
   READ_VLC(max_transform_hierarchy_depth_intra, uvlc);
+
+  if (log2_min_luma_coding_block_size > 6) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (log2_min_luma_coding_block_size + log2_diff_max_min_luma_coding_block_size > 6) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (log2_min_transform_block_size > 5) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (log2_min_transform_block_size + log2_diff_max_min_transform_block_size > 5) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+
   scaling_list_enable_flag = get_bits(br,1);
 
   if (scaling_list_enable_flag) {
@@ -243,10 +451,11 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     pcm_loop_filter_disable_flag = 0;
   }
 
+  int num_short_term_ref_pic_sets;
   READ_VLC(num_short_term_ref_pic_sets, uvlc);
   if (num_short_term_ref_pic_sets < 0 ||
       num_short_term_ref_pic_sets > 64) {
-    ctx->add_warning(DE265_WARNING_NUMBER_OF_SHORT_TERM_REF_PIC_SETS_OUT_OF_RANGE, false);
+    errqueue->add_warning(DE265_WARNING_NUMBER_OF_SHORT_TERM_REF_PIC_SETS_OUT_OF_RANGE, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
@@ -258,7 +467,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   for (int i = 0; i < num_short_term_ref_pic_sets; i++) {
 
-    bool success = read_short_term_ref_pic_set(ctx,this,br,
+    bool success = read_short_term_ref_pic_set(errqueue,this,br,
                                                &ref_pic_sets[i], i,
                                                ref_pic_sets,
                                                false);
@@ -292,33 +501,60 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   strong_intra_smoothing_enable_flag = get_bits(br,1);
   vui_parameters_present_flag = get_bits(br,1);
 
-#if 0
-  if (vui_parameters_present_flag) {
-    assert(false);
-    /*
-      vui_parameters()
-
-        sps_extension_flag
-        u(1)
-        if( sps_extension_flag )
-
-          while( more_rbsp_data() )
-
-            sps_extension_data_flag
-              u(1)
-              rbsp_trailing_bits()
-    */
+if (vui_parameters_present_flag) {
+    vui.read(br, sps_max_sub_layers - 1);
   }
 
-  sps_extension_flag = get_bits(br,1);
-  if (sps_extension_flag) {
-    assert(false);
+  sps_extension_present_flag = get_bits(br,1);
+  if (sps_extension_present_flag) {
+    sps_range_extension_flag = get_bits(br,1);
+    sps_multilayer_extension_flag = get_bits(br,1);
+    sps_extension_6bits = get_bits(br,6);
+  }
+  else {
+    sps_range_extension_flag = false;
+    sps_multilayer_extension_flag = false;
+    sps_extension_6bits = 0;
   }
 
-  check_rbsp_trailing_bits(br);
-#endif
+  if (sps_range_extension_flag) {
+    range_extension.read(br);
+  }
+  if (sps_multilayer_extension_flag) {
+    multilayer_extension.read(br);
+  }
+  if (sps_extension_6bits > 0) {
+    // The remaining bits are sps_extension_data_flags
+  }
+  // The remaining bits are rsbp_trailing_bits()
 
+
+  de265_error err = compute_derived_values();
+  if (err != DE265_OK) { return err; }
+
+  sps_read = true;
+
+  return DE265_OK;
+}
+
+
+de265_error seq_parameter_set::compute_derived_values()
+{
   // --- compute derived values ---
+
+  SubWidthC  = SubWidthC_tab [chroma_format_idc];
+  SubHeightC = SubHeightC_tab[chroma_format_idc];
+
+  if (ChromaArrayType==0) {
+    WinUnitX = 1;
+    WinUnitY = 1;
+  }
+  else {
+    WinUnitX = SubWidthC_tab [chroma_format_idc];
+    WinUnitY = SubHeightC_tab[chroma_format_idc];
+  }
+
+
 
   BitDepth_Y   = bit_depth_luma;
   QpBdOffset_Y = 6*(bit_depth_luma-8);
@@ -350,6 +586,9 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   Log2MinTrafoSize = log2_min_transform_block_size;
   Log2MaxTrafoSize = log2_min_transform_block_size + log2_diff_max_min_transform_block_size;
 
+  if (max_transform_hierarchy_depth_inter > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (max_transform_hierarchy_depth_intra > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+
   Log2MinPUSize = Log2MinCbSizeY-1;
   PicWidthInMinPUs  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinPUSize);
   PicHeightInMinPUs = PicHeightInCtbsY << (Log2CtbSizeY - Log2MinPUSize);
@@ -380,6 +619,16 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
+
+  if (BitDepth_Y < 8 || BitDepth_Y > 16) {
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+  if (BitDepth_C < 8 || BitDepth_C > 16) {
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+
   sps_read = true;
 
   return DE265_OK;
@@ -387,7 +636,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
 
 
-void seq_parameter_set::dump_sps(int fd) const
+void seq_parameter_set::dump(int fd) const
 {
   //#if (_MSC_VER >= 1500)
   //#define LOG0(t) loginfo(LogHeaders, t)
@@ -411,7 +660,7 @@ void seq_parameter_set::dump_sps(int fd) const
   LOG1("sps_max_sub_layers      : %d\n", sps_max_sub_layers);
   LOG1("sps_temporal_id_nesting_flag : %d\n", sps_temporal_id_nesting_flag);
 
-  dump_profile_tier_level(&profile_tier_level, sps_max_sub_layers, fh);
+  profile_tier_level_.dump(sps_max_sub_layers, fh);
 
   LOG1("seq_parameter_set_id    : %d\n", seq_parameter_set_id);
   LOG2("chroma_format_idc       : %d (%s)\n", chroma_format_idc,
@@ -481,9 +730,9 @@ void seq_parameter_set::dump_sps(int fd) const
     LOG1("pcm_loop_filter_disable_flag  : %d\n", pcm_loop_filter_disable_flag);
   }
 
-  LOG1("num_short_term_ref_pic_sets : %d\n", num_short_term_ref_pic_sets);
+  LOG1("num_short_term_ref_pic_sets : %d\n", ref_pic_sets.size());
 
-  for (int i = 0; i < num_short_term_ref_pic_sets; i++) {
+  for (int i = 0; i < ref_pic_sets.size(); i++) {
     LOG1("ref_pic_set[ %2d ]: ",i);
     dump_compact_short_term_ref_pic_set(&ref_pic_sets[i], 16, fh);
   }
@@ -510,6 +759,8 @@ void seq_parameter_set::dump_sps(int fd) const
   LOG1("MinTBSizeY   : %d\n", 1<<log2_min_transform_block_size);
   LOG1("MaxTBSizeY   : %d\n", 1<<(log2_min_transform_block_size + log2_diff_max_min_transform_block_size));
 
+  LOG1("PicWidthInCtbsY         : %d\n", PicWidthInCtbsY);
+  LOG1("PicHeightInCtbsY        : %d\n", PicHeightInCtbsY);
   LOG1("SubWidthC               : %d\n", SubWidthC);
   LOG1("SubHeightC              : %d\n", SubHeightC);
 
@@ -764,6 +1015,16 @@ de265_error read_scaling_list(bitreader* br, const seq_parameter_set* sps,
 }
 
 
+de265_error write_scaling_list(CABAC_encoder& out, const seq_parameter_set* sps,
+                              scaling_list_data* sclist, bool inPPS)
+{
+  assert(false);
+  // TODO
+
+  return DE265_OK;
+}
+
+
 void set_default_scaling_lists(scaling_list_data* sclist)
 {
   // 4x4
@@ -797,4 +1058,251 @@ void set_default_scaling_lists(scaling_list_data* sclist)
                       default_ScalingList_8x8_intra, 3);
   fill_scaling_factor(&sclist->ScalingFactor_Size3[1][0][0],
                       default_ScalingList_8x8_inter, 3);
+}
+
+
+de265_error seq_parameter_set::write(error_queue* errqueue, CABAC_encoder& out)
+{
+  out.write_bits(video_parameter_set_id, 4);
+  if (sps_max_sub_layers>7) {
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  out.write_bits(sps_max_sub_layers-1, 3);
+
+  out.write_bit(sps_temporal_id_nesting_flag);
+
+  profile_tier_level_.write(out, sps_max_sub_layers);
+
+  out.write_uvlc(seq_parameter_set_id);
+
+
+  // --- encode chroma type ---
+
+  out.write_uvlc(chroma_format_idc);
+
+  if (chroma_format_idc<0 ||
+      chroma_format_idc>3) {
+    errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+  if (chroma_format_idc == 3) {
+    out.write_bit(separate_colour_plane_flag);
+  }
+
+
+  // --- picture size ---
+
+  out.write_uvlc(pic_width_in_luma_samples);
+  out.write_uvlc(pic_height_in_luma_samples);
+
+  out.write_bit(conformance_window_flag);
+
+  if (conformance_window_flag) {
+    out.write_uvlc(conf_win_left_offset);
+    out.write_uvlc(conf_win_right_offset);
+    out.write_uvlc(conf_win_top_offset);
+    out.write_uvlc(conf_win_bottom_offset);
+  }
+
+
+  out.write_uvlc(bit_depth_luma-8);
+  out.write_uvlc(bit_depth_chroma-8);
+
+  out.write_uvlc(log2_max_pic_order_cnt_lsb-4);
+
+
+  // --- sub_layer_ordering_info ---
+
+  out.write_bit(sps_sub_layer_ordering_info_present_flag);
+
+  int firstLayer = (sps_sub_layer_ordering_info_present_flag ?
+                    0 : sps_max_sub_layers-1 );
+
+  for (int i=firstLayer ; i <= sps_max_sub_layers-1; i++ ) {
+
+    // sps_max_dec_pic_buffering[i]
+
+    if (sps_max_dec_pic_buffering[i] > MAX_NUM_REF_PICS) {
+      errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    out.write_uvlc(sps_max_dec_pic_buffering[i]-1);
+
+    // sps_max_num_reorder_pics[i]
+
+    out.write_uvlc(sps_max_num_reorder_pics[i]);
+
+
+    // sps_max_latency_increase[i]
+
+    out.write_uvlc(sps_max_latency_increase_plus1[i]);
+  }
+
+
+  out.write_uvlc(log2_min_luma_coding_block_size-3);
+  out.write_uvlc(log2_diff_max_min_luma_coding_block_size);
+  out.write_uvlc(log2_min_transform_block_size-2);
+  out.write_uvlc(log2_diff_max_min_transform_block_size);
+  out.write_uvlc(max_transform_hierarchy_depth_inter);
+  out.write_uvlc(max_transform_hierarchy_depth_intra);
+  out.write_bit(scaling_list_enable_flag);
+
+  if (scaling_list_enable_flag) {
+
+    out.write_bit(sps_scaling_list_data_present_flag);
+    if (sps_scaling_list_data_present_flag) {
+
+      de265_error err;
+      if ((err=write_scaling_list(out,this, &scaling_list, false)) != DE265_OK) {
+        return err;
+      }
+    }
+  }
+
+  out.write_bit(amp_enabled_flag);
+  out.write_bit(sample_adaptive_offset_enabled_flag);
+  out.write_bit(pcm_enabled_flag);
+  if (pcm_enabled_flag) {
+    out.write_bits(pcm_sample_bit_depth_luma  -1,4);
+    out.write_bits(pcm_sample_bit_depth_chroma-1,4);
+    out.write_uvlc(log2_min_pcm_luma_coding_block_size-3);
+    out.write_uvlc(log2_diff_max_min_pcm_luma_coding_block_size);
+    out.write_bit(pcm_loop_filter_disable_flag);
+  }
+
+  int num_short_term_ref_pic_sets = ref_pic_sets.size();
+  if (num_short_term_ref_pic_sets < 0 ||
+      num_short_term_ref_pic_sets > 64) {
+    errqueue->add_warning(DE265_WARNING_NUMBER_OF_SHORT_TERM_REF_PIC_SETS_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  out.write_uvlc(num_short_term_ref_pic_sets);
+
+  // --- allocate reference pic set ---
+
+  // we do not allocate the ref-pic-set for the slice header here, but in the slice header itself
+
+  for (int i = 0; i < num_short_term_ref_pic_sets; i++) {
+
+    bool success = write_short_term_ref_pic_set(errqueue,this,out,
+                                                &ref_pic_sets[i], i,
+                                                ref_pic_sets,
+                                                false);
+
+    if (!success) {
+      return DE265_WARNING_SPS_HEADER_INVALID;
+    }
+
+    // dump_short_term_ref_pic_set(&(*ref_pic_sets)[i], fh);
+  }
+
+  out.write_bit(long_term_ref_pics_present_flag);
+
+  if (long_term_ref_pics_present_flag) {
+
+    if (num_long_term_ref_pics_sps > MAX_NUM_LT_REF_PICS_SPS) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    out.write_uvlc(num_long_term_ref_pics_sps);
+
+    for (int i = 0; i < num_long_term_ref_pics_sps; i++ ) {
+      out.write_bits(lt_ref_pic_poc_lsb_sps[i], log2_max_pic_order_cnt_lsb);
+      out.write_bit (used_by_curr_pic_lt_sps_flag[i]);
+    }
+  }
+
+  out.write_bit(sps_temporal_mvp_enabled_flag);
+  out.write_bit(strong_intra_smoothing_enable_flag);
+  out.write_bit(vui_parameters_present_flag);
+
+#if 0
+  if (vui_parameters_present_flag) {
+    assert(false);
+    /*
+      vui_parameters()
+        sps_extension_flag
+        u(1)
+        if( sps_extension_flag )
+          while( more_rbsp_data() )
+            sps_extension_data_flag
+              u(1)
+              rbsp_trailing_bits()
+    */
+  }
+#endif
+
+  out.write_bit(sps_extension_present_flag);
+
+#if 0
+  if (sps_extension_flag) {
+    assert(false);
+  }
+  check_rbsp_trailing_bits(br);
+#endif
+
+  // --- compute derived values ---
+
+#if 0
+  BitDepth_Y   = bit_depth_luma;
+  QpBdOffset_Y = 6*(bit_depth_luma-8);
+  BitDepth_C   = bit_depth_chroma;
+  QpBdOffset_C = 6*(bit_depth_chroma-8);
+  Log2MinCbSizeY = log2_min_luma_coding_block_size;
+  Log2CtbSizeY = Log2MinCbSizeY + log2_diff_max_min_luma_coding_block_size;
+  MinCbSizeY = 1 << Log2MinCbSizeY;
+  CtbSizeY = 1 << Log2CtbSizeY;
+  PicWidthInMinCbsY = pic_width_in_luma_samples / MinCbSizeY;
+  PicWidthInCtbsY   = ceil_div(pic_width_in_luma_samples, CtbSizeY);
+  PicHeightInMinCbsY = pic_height_in_luma_samples / MinCbSizeY;
+  PicHeightInCtbsY   = ceil_div(pic_height_in_luma_samples,CtbSizeY);
+  PicSizeInMinCbsY   = PicWidthInMinCbsY * PicHeightInMinCbsY;
+  PicSizeInCtbsY = PicWidthInCtbsY * PicHeightInCtbsY;
+  PicSizeInSamplesY = pic_width_in_luma_samples * pic_height_in_luma_samples;
+  if (chroma_format_idc==0 || separate_colour_plane_flag) {
+    CtbWidthC  = 0;
+    CtbHeightC = 0;
+  }
+  else {
+    CtbWidthC  = CtbSizeY / SubWidthC;
+    CtbHeightC = CtbSizeY / SubHeightC;
+  }
+  Log2MinTrafoSize = log2_min_transform_block_size;
+  Log2MaxTrafoSize = log2_min_transform_block_size + log2_diff_max_min_transform_block_size;
+  Log2MinPUSize = Log2MinCbSizeY-1;
+  PicWidthInMinPUs  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinPUSize);
+  PicHeightInMinPUs = PicHeightInCtbsY << (Log2CtbSizeY - Log2MinPUSize);
+  Log2MinIpcmCbSizeY = log2_min_pcm_luma_coding_block_size;
+  Log2MaxIpcmCbSizeY = (log2_min_pcm_luma_coding_block_size +
+                        log2_diff_max_min_pcm_luma_coding_block_size);
+  // the following are not in the standard
+  PicWidthInTbsY  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinTrafoSize);
+  PicHeightInTbsY = PicHeightInCtbsY << (Log2CtbSizeY - Log2MinTrafoSize);
+  PicSizeInTbsY = PicWidthInTbsY * PicHeightInTbsY;
+  sps_read = true;
+#endif
+
+  return DE265_OK;
+}
+
+de265_error sps_range_extension::read(bitreader* reader)
+{
+  transform_skip_rotation_enabled_flag = get_bits(reader,1);
+  transform_skip_context_enabled_flag = get_bits(reader,1);
+  implicit_rdpcm_enabled_flag = get_bits(reader,1);
+  explicit_rdpcm_enabled_flag = get_bits(reader,1);
+  extended_precision_processing_flag = get_bits(reader,1);
+  intra_smoothing_disabled_flag = get_bits(reader,1);
+  high_precision_offsets_enabled_flag = get_bits(reader,1);
+  persistent_rice_adaptation_enabled_flag = get_bits(reader,1);
+  cabac_bypass_alignment_enabled_flag = get_bits(reader,1);
+
+  return DE265_OK;
+}
+
+de265_error sps_multilayer_extension::read(bitreader* reader)
+{
+  inter_view_mv_vert_constraint_flag = get_bits(reader,1);
+  return DE265_OK;
 }

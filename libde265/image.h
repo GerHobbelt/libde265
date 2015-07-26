@@ -33,13 +33,13 @@
 #include <stdbool.h>
 #endif
 #include "libde265/de265.h"
+#include "libde265/en265.h"
 #include "libde265/sps.h"
 #include "libde265/pps.h"
 #include "libde265/motion.h"
 #include "libde265/threads.h"
 #include "libde265/slice.h"
 #include "libde265/nal.h"
-
 
 enum PictureState {
   UnusedForReference,
@@ -78,6 +78,8 @@ enum PictureState {
 #define CTB_PROGRESS_DEBLK_H   3
 #define CTB_PROGRESS_SAO       4
 
+class decoder_context;
+
 template <class DataUnit> class MetaDataArray
 {
  public:
@@ -91,9 +93,10 @@ template <class DataUnit> class MetaDataArray
       free(data);
       data = (DataUnit*)malloc(size * sizeof(DataUnit));
       data_size = size;
-      width_in_units = w;
-      height_in_units = h;
     }
+
+    width_in_units = w;
+    height_in_units = h;
 
     log2unitSize = _log2unitSize;
 
@@ -102,6 +105,10 @@ template <class DataUnit> class MetaDataArray
 
   void clear() {
     if (data) memset(data, 0, sizeof(DataUnit) * data_size);
+  }
+
+  void copy(const MetaDataArray *src) {
+    if (data && src->data_size == data_size) memcpy(data, src->data, data_size * sizeof(DataUnit));
   }
 
   const DataUnit& get(int x,int y) const {
@@ -137,6 +144,8 @@ template <class DataUnit> class MetaDataArray
   DataUnit& operator[](int idx) { return data[idx]; }
   const DataUnit& operator[](int idx) const { return data[idx]; }
 
+  int size() const { return data_size; }
+
   // private:
   DataUnit* data;
   int data_size;
@@ -155,6 +164,16 @@ template <class DataUnit> class MetaDataArray
         cb_info[ cbx + cby*cb_info.width_in_units ].Field = value;  \
       }
 
+#define CLEAR_TB_BLK(x,y,log2BlkWidth)              \
+  int tuX = x >> tu_info.log2unitSize; \
+  int tuY = y >> tu_info.log2unitSize; \
+  int width = 1 << (log2BlkWidth - tu_info.log2unitSize);           \
+  for (int tuy=tuY;tuy<tuY+width;tuy++)                             \
+    for (int tux=tuX;tux<tuX+width;tux++)                           \
+      {                                                             \
+        tu_info[ tux + tuy*tu_info.width_in_units ] = 0;  \
+      }
+
 
 typedef struct {
   uint16_t SliceAddrRS;
@@ -162,30 +181,44 @@ typedef struct {
 
   sao_info saoInfo;
   bool     deblock;         // this CTB has to be deblocked
-  bool     has_pcm;         // pcm is used in this CTB
-  bool     has_cu_transquant_bypass; // transquant_bypass is used in this CTB
+
+  // The following flag helps to quickly check whether we have to
+  // check all conditions in the SAO filter or whether we can skip them.
+  bool     has_pcm_or_cu_transquant_bypass; // pcm or transquant_bypass is used in this CTB
 } CTB_info;
 
 
 typedef struct {
-  uint8_t log2CbSize : 3;   // [0;6] (1<<log2CbSize) = 64
+  uint8_t log2CbSize : 3;   /* [0;6] (1<<log2CbSize) = 64
+                               This is only set in the top-left corner of the CB.
+                               The other values should be zero.
+                               TODO: in the encoder, we have to clear to zero.
+                               Used in deblocking and QP-scale decoding */
   uint8_t PartMode : 3;     // (enum PartMode)  [0;7] set only in top-left of CB
-                            // TODO: could be removed if prediction-block-boundaries would be
-                            // set during decoding
-  uint8_t ctDepth : 2;      // [0:3]? (0:64, 1:32, 2:16, 3:8)
+                            // Used for spatial merging candidates in current frame
+                            // and for deriving interSplitFlag in decoding.
+
+  uint8_t ctDepth : 2;      // [0:3]? (for CTB size 64: 0:64, 1:32, 2:16, 3:8)
+                            // Used for decoding/encoding split_cu flag.
+
+  // --- byte boundary ---
   uint8_t PredMode : 2;     // (enum PredMode)  [0;2] must be saved for past images
-  uint8_t pcm_flag : 1;     //
-  uint8_t cu_transquant_bypass : 1;
+                            // Used in motion decoding.
+  uint8_t pcm_flag : 1;     // Stored for intra-prediction / SAO
+  uint8_t cu_transquant_bypass : 1; // Stored for SAO
+  // note: 4 bits left
 
-  int8_t  QP_Y;
+  // --- byte boundary ---
+  int8_t  QP_Y;  // Stored for QP prediction
 
-  // uint8_t pcm_flag;  // TODO
 } CB_ref_info;
 
 
 typedef struct {
-  PredVectorInfo mvi; // TODO: this can be done in 16x16 grid
+  MotionVectorSpec mv; // TODO: this can be done in 16x16 grid
 } PB_ref_info;
+
+// intraPredMode:   Used for determining scanIdx when decoding/encoding coefficients.
 
 
 
@@ -194,12 +227,19 @@ struct de265_image {
   ~de265_image();
 
 
-  de265_error alloc_image(int w,int h, enum de265_chroma c, const seq_parameter_set* sps,
-                          bool allocMetadata, decoder_context* ctx, de265_PTS pts, void* user_data,
-                          bool isOutputImage);
+  de265_error alloc_image(int w,int h, enum de265_chroma c,
+                          const seq_parameter_set* sps,
+                          bool allocMetadata,
+                          decoder_context* dctx,
+                          class encoder_context* ectx,
+                          de265_PTS pts, void* user_data,
+                          bool useCustomAllocFunctions,
+                          bool interLayerReferencePicture=false);
+
+  //de265_error alloc_encoder_data(const seq_parameter_set* sps);
 
   bool is_allocated() const { return pixels[0] != NULL; }
-
+  
   void release();
 
   void fill_image(int y,int u,int v);
@@ -208,7 +248,6 @@ struct de265_image {
   void exchange_pixel_data_with(de265_image&);
 
   uint32_t get_ID() const { return ID; }
-
 
   /* */ uint8_t* get_image_plane(int cIdx)       { return pixels[cIdx]; }
   const uint8_t* get_image_plane(int cIdx) const { return pixels[cIdx]; }
@@ -221,12 +260,33 @@ struct de265_image {
     return pixels[cIdx] + xpos + ypos*stride;
   }
 
+  template <class pixel_t>
+  pixel_t* get_image_plane_at_pos_NEW(int cIdx, int xpos,int ypos)
+  {
+    int stride = get_image_stride(cIdx);
+    return (pixel_t*)(pixels[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
+  }
+
   const uint8_t* get_image_plane_at_pos(int cIdx, int xpos,int ypos) const
   {
     int stride = get_image_stride(cIdx);
     return pixels[cIdx] + xpos + ypos*stride;
   }
 
+  void* get_image_plane_at_pos_any_depth(int cIdx, int xpos,int ypos)
+  {
+    int stride = get_image_stride(cIdx);
+    return pixels[cIdx] + ((xpos + ypos*stride) << bpp_shift[cIdx]);
+  }
+
+  const void* get_image_plane_at_pos_any_depth(int cIdx, int xpos,int ypos) const
+  {
+    int stride = get_image_stride(cIdx);
+    return pixels[cIdx] + ((xpos + ypos*stride) << bpp_shift[cIdx]);
+  }
+
+  /* Number of pixels in one row (not number of bytes).
+   */
   int get_image_stride(int cIdx) const
   {
     if (cIdx==0) return stride;
@@ -241,6 +301,18 @@ struct de265_image {
 
   enum de265_chroma get_chroma_format() const { return chroma_format; }
 
+  int get_bit_depth(int cIdx) const {
+    if (cIdx==0) return sps.BitDepth_Y;
+    else         return sps.BitDepth_C;
+  }
+
+  int get_bytes_per_pixel(int cIdx) const {
+    return (get_bit_depth(cIdx)+7)/8;
+  }
+
+  bool high_bit_depth(int cIdx) const {
+    return get_bit_depth(cIdx)>8;
+  }
 
   bool can_be_released() const { return PicOutputFlag==false && PicState==UnusedForReference; }
 
@@ -260,11 +332,17 @@ struct de265_image {
 
   static de265_image_allocation default_image_allocation;
 
+  void printBlk(const char* title, int x0,int y0,int blkSize,int cIdx) const {
+    ::printBlk(title, get_image_plane_at_pos(cIdx,x0,y0),
+               blkSize, get_image_stride(cIdx));
+  }
+
 private:
   uint32_t ID;
   static uint32_t s_next_image_ID;
 
   uint8_t* pixels[3];
+  uint8_t  bpp_shift[3];  // 0 for 8 bit, 1 for 16 bit
 
   enum de265_chroma chroma_format;
 
@@ -272,6 +350,52 @@ private:
 
   int chroma_width, chroma_height;
   int stride, chroma_stride;
+
+  /// Multilayer extension
+public:
+        bool is_inter_layer_reference_picture()       { return bIlRefPic; }
+  const bool is_inter_layer_reference_picture() const { return bIlRefPic; }
+
+  // Set the pointer to the lower layer reference
+  void set_lower_layer_picture(const de265_image* src);
+  // Get pointers to the reconstruction pixel data from the source
+  void get_pixel_pointers_from(de265_image *src);
+  
+  // Set the parameters needed for metadata upsampling
+  void set_inter_layer_metadata_scaling_parameters( int scaling_parameters[10] );
+  // Set the given upsampling parameters
+  void set_inter_layer_upsampling_parameters(int upsampling_params[2][10]);
+  // If set to true, the functions get_pred_mode and get_mv_info will return the upsampled lower layer metadata.
+  // Remember to set_inter_layer_metadata_scaling_parameters() and set_lower_layer_picture() first.
+  void setInterLayerMotionPredictionEnabled(bool ilPred) { interLayerMotionPredictionEnabled = ilPred; }
+
+  // Set/get if upsampling has to be performed
+  void setEqualPictureSizeAndOffsetFlag(bool f) { equalPictureSizeAndOffsetFlag = f; }
+  bool getEqualPictureSizeAndOffsetFlag()       { return equalPictureSizeAndOffsetFlag; }
+  const bool getEqualPictureSizeAndOffsetFlag() const { return equalPictureSizeAndOffsetFlag; }
+
+  const de265_image* get_il_refPic() const { return ilRefPic; };
+  const int *get_upsampling_parameters(bool bChroma) const { return bChroma ? il_upsampling_parameters[1] : il_upsampling_parameters[0]; }
+  
+  //// Upsample the image from the source using the given upsampling parameters
+  //void upsample_image_from(decoder_context* ctx, de265_image* rlPic, int upsampling_params[2][10]);
+  //
+    
+  //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
+  //void colour_mapping(decoder_context* ctx, de265_image* rlPic, colour_mapping_table *map, int colourMappingParams[2]);
+
+private:
+  bool bIlRefPic;
+  bool equalPictureSizeAndOffsetFlag;  // Is upsampling required? (True for SNR scalability)
+  bool interLayerMotionPredictionEnabled;
+  int  il_scaling_parameters[10];
+  int  il_upsampling_parameters[2][10];
+  // Pointer to the lower layer reference picture.
+  // This is used by get_SliceHeaderIndex to retrive the header of the lower layer reference.
+  const de265_image* ilRefPic;
+
+  MotionVectorSpec get_mv_info_lower_layer(int x, int y) const; // Get MV from lower layer
+  PredMode get_pred_mode_lower_layer(int x, int y) const;       // Get PredMode from lower layer
 
 public:
   std::vector<slice_segment_header*> slices;
@@ -300,6 +424,9 @@ public:
   seq_parameter_set   sps;  // the SPS used for decoding this image
   pic_parameter_set   pps;  // the PPS used for decoding this image
   decoder_context*    decctx;
+  class encoder_context*    encctx;
+
+  int number_of_ctbs() const { return ctb_info.size(); }
 
 private:
   MetaDataArray<CTB_info>    ctb_info;
@@ -316,6 +443,9 @@ public:
   void*     user_data;
   void*     plane_user_data[3];  // this is logically attached to the pixel data pointers
   de265_image_allocation image_allocation_functions; // the functions used for memory allocation
+  void (*encoder_image_release_func)(en265_encoder_context*,
+                                     de265_image*,
+                                     void* userdata);
 
   uint8_t integrity; /* Whether an error occured while the image was decoded.
                         When generated, this is initialized to INTEGRITY_CORRECT,
@@ -337,12 +467,13 @@ public:
 
 
   void thread_start(int nThreads);
-  void thread_run();
+  void thread_run(const thread_task*);
   void thread_blocks();
   void thread_unblocks();
-  void thread_finishes(); /* NOTE: you should not access any data in the thread_task after
-                             calling this, as this function may unlock other threads that
-                             will push this image to the output queue and free all decoder data. */
+  /* NOTE: you should not access any data in the thread_task after
+     calling this, as this function may unlock other threads that
+     will push this image to the output queue and free all decoder data. */
+  void thread_finishes(const thread_task*);
 
   void wait_for_progress(thread_task* task, int ctbx,int ctby, int progress);
   void wait_for_progress(thread_task* task, int ctbAddrRS, int progress);
@@ -377,6 +508,8 @@ public:
     SET_CB_BLK(x,y,log2BlkWidth, PredMode, mode);
   }
 
+  void set_pred_mode(int x,int y, int nPbW,int nPbH, enum PredMode mode);
+  
   void fill_pred_mode(enum PredMode mode)
   {
     for (int i=0;i<cb_info.data_size;i++)
@@ -385,7 +518,10 @@ public:
 
   enum PredMode get_pred_mode(int x,int y) const
   {
-    return (enum PredMode)cb_info.get(x,y).PredMode;
+    if (bIlRefPic)
+      return get_pred_mode_lower_layer(x,y);
+    else
+      return (enum PredMode)cb_info.get(x,y).PredMode;
   }
 
   uint8_t get_cu_skip_flag(int x,int y) const
@@ -393,10 +529,12 @@ public:
     return get_pred_mode(x,y)==MODE_SKIP;
   }
 
-  void set_pcm_flag(int x,int y, int log2BlkWidth)
+  void set_pcm_flag(int x,int y, int log2BlkWidth, uint8_t value=1)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, pcm_flag, 1);
-    ctb_info.get(x,y).has_pcm = true;
+    SET_CB_BLK(x,y,log2BlkWidth, pcm_flag, value);
+
+    // TODO: in the encoder, we somewhere have to clear this
+    ctb_info.get(x,y).has_pcm_or_cu_transquant_bypass = true;
   }
 
   int  get_pcm_flag(int x,int y) const
@@ -404,10 +542,12 @@ public:
     return cb_info.get(x,y).pcm_flag;
   }
 
-  void set_cu_transquant_bypass(int x,int y, int log2BlkWidth)
+  void set_cu_transquant_bypass(int x,int y, int log2BlkWidth, uint8_t value=1)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, cu_transquant_bypass, 1);
-    ctb_info.get(x,y).has_cu_transquant_bypass = true;
+    SET_CB_BLK(x,y,log2BlkWidth, cu_transquant_bypass, value);
+
+    // TODO: in the encoder, we somewhere have to clear this
+    ctb_info.get(x,y).has_pcm_or_cu_transquant_bypass = true;
   }
 
   int  get_cu_transquant_bypass(int x,int y) const
@@ -415,11 +555,16 @@ public:
     return cb_info.get(x,y).cu_transquant_bypass;
   }
 
-  void set_log2CbSize(int x0, int y0, int log2CbSize)
+  void set_log2CbSize(int x0, int y0, int log2CbSize, bool fill)
   {
-    cb_info.get(x0,y0).log2CbSize = log2CbSize;
+    // In theory, we could assume that remaining cb_info blocks are initialized to zero.
+    // But in corrupted streams, slices may overlap and set contradicting log2CbSizes.
+    // We also need this for encoding.
+    if (fill) {
+      SET_CB_BLK(x0,y0,log2CbSize, log2CbSize, 0);
+    }
 
-    // assume that remaining cb_info blocks are initialized to zero
+    cb_info.get(x0,y0).log2CbSize = log2CbSize;
   }
 
   int  get_log2CbSize(int x0, int y0) const
@@ -470,6 +615,11 @@ public:
     tu_info.get(x0,y0) |= (1<<trafoDepth);
   }
 
+  void clear_split_transform_flags(int x0,int y0,int log2CbSize)
+  {
+    CLEAR_TB_BLK (x0,y0, log2CbSize);
+  }
+
   int  get_split_transform_flag(int x0,int y0,int trafoDepth) const
   {
     return (tu_info.get(x0,y0) & (1<<trafoDepth));
@@ -509,12 +659,41 @@ public:
   void set_IntraPredMode(int PUidx,int log2blkSize, enum IntraPredMode mode)
   {
     int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
-    
+
     for (int y=0;y<pbSize;y++)
       for (int x=0;x<pbSize;x++)
         intraPredMode[PUidx + x + y*intraPredMode.width_in_units] = mode;
   }
 
+  void set_IntraPredMode(int x0,int y0,int log2blkSize, enum IntraPredMode mode)
+  {
+    int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
+    int PUidx  = (x0>>sps.Log2MinPUSize) + (y0>>sps.Log2MinPUSize)*sps.PicWidthInMinPUs;
+
+    for (int y=0;y<pbSize;y++)
+      for (int x=0;x<pbSize;x++) {
+        assert(x<sps.PicWidthInMinPUs);
+        assert(y<sps.PicHeightInMinPUs);
+
+        int idx = PUidx + x + y*intraPredMode.width_in_units;
+        assert(idx<intraPredMode.data_size);
+        intraPredMode[idx] = mode;
+      }
+  }
+
+  /*
+  // NOTE: encoder only
+  void set_ChromaIntraPredMode(int x,int y,int log2BlkWidth, enum IntraChromaPredMode mode)
+  {
+    SET_CB_BLK (x, y, log2BlkWidth, intra_chroma_pred_mode, mode);
+  }
+
+  // NOTE: encoder only
+  enum IntraChromaPredMode get_ChromaIntraPredMode(int x,int y) const
+  {
+    return (enum IntraChromaPredMode)(cb_info.get(x,y).intra_chroma_pred_mode);
+  }
+  */
 
   // --- CTB metadata access ---
 
@@ -543,6 +722,31 @@ public:
 
   int  get_SliceHeaderIndex(int x, int y) const
   {
+    if (bIlRefPic) {
+      // Get the slice header index from the lower layer reference picture
+
+      if (equalPictureSizeAndOffsetFlag) {
+        // SNR. No sclaing required.
+        return ilRefPic->get_SliceHeaderIndex(x, y);
+      }
+      else {
+        // Get the corresponding lower layer position.
+      
+        // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
+        int xPCtr = x + 8;  // (H 65)
+        int yPCtr = y + 8;  // (H 66)
+
+        // 2. The variables xRef and yRef are derived as follows:
+        int xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
+        int yRef = (((yPCtr - il_scaling_parameters[1]) * il_scaling_parameters[3] + (1 << 15)) >> 16 ) + il_scaling_parameters[5];  // (H 68)
+
+        // 3. The rounded reference layer luma sample location ( xRL, yRL ) is derived as follows:
+        int xRL = ((xRef + 4) >> 4) << 4;  // (H 69)
+        int yRL = ((yRef + 4) >> 4) << 4;  // (H 70)
+
+        return ilRefPic->get_SliceHeaderIndex(xRL, yRL);
+      }
+    }
     return ctb_info.get(x,y).SliceHeaderIndex;
   }
 
@@ -556,30 +760,42 @@ public:
     return ctb_info[ctb].SliceHeaderIndex;
   }
 
+  bool is_SliceHeader_available(int x,int y) const
+  {
+    int idx = ctb_info.get(x,y).SliceHeaderIndex;
+    return idx >= 0 && idx < slices.size();
+  }
+
   slice_segment_header* get_SliceHeader(int x, int y)
   {
-    return slices[ get_SliceHeaderIndex(x,y) ];
+    int idx = get_SliceHeaderIndex(x,y);
+    if (idx >= slices.size()) { return NULL; }
+    return slices[idx];
   }
 
   slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY)
   {
-    return slices[ get_SliceHeaderIndexCtb(ctbX,ctbY) ];
+    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    if (idx >= slices.size()) { return NULL; }
+    return slices[idx];
   }
 
   const slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY) const
   {
-    return slices[ get_SliceHeaderIndexCtb(ctbX,ctbY) ];
+    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    if (idx >= slices.size()) { return NULL; }
+    return slices[idx];
   }
-  
+
   void set_sao_info(int ctbX,int ctbY,const sao_info* saoinfo)
   {
     sao_info* sao = &ctb_info[ctbX + ctbY*ctb_info.width_in_units].saoInfo;
-    
+
     memcpy(sao,
            saoinfo,
            sizeof(sao_info));
   }
-  
+
   const sao_info* get_sao_info(int ctbX,int ctbY) const
   {
     return &ctb_info[ctbX + ctbY*ctb_info.width_in_units].saoInfo;
@@ -598,16 +814,10 @@ public:
   }
 
 
-  bool get_CTB_has_pcm(int ctbX,int ctbY) const
+  bool get_CTB_has_pcm_or_cu_transquant_bypass(int ctbX,int ctbY) const
   {
     int idx = ctbX + ctbY*ctb_info.width_in_units;
-    return ctb_info[idx].has_pcm;
-  }
-
-  bool get_CTB_has_cu_transquant_bypass(int ctbX,int ctbY) const
-  {
-    int idx = ctbX + ctbY*ctb_info.width_in_units;
-    return ctb_info[idx].has_cu_transquant_bypass;
+    return ctb_info[idx].has_pcm_or_cu_transquant_bypass;
   }
 
 
@@ -621,7 +831,7 @@ public:
   {
     const int xd = x0/4;
     const int yd = y0/4;
-    
+
     if (xd<deblk_info.width_in_units &&
         yd<deblk_info.height_in_units) {
       deblk_info[xd + yd*deblk_info.width_in_units] |= flags;
@@ -651,15 +861,35 @@ public:
 
   // --- PB metadata access ---
 
-  const PredVectorInfo* get_mv_info(int x,int y) const
+  const MotionVectorSpec get_mv_info(int x,int y) const
   {
-    return &pb_info.get(x,y).mvi;
+    if (bIlRefPic) {
+      if (interLayerMotionPredictionEnabled)
+        // Get mv info from lower layer image
+        return get_mv_info_lower_layer(x,y);
+      else {
+        // Return invalid vector
+        MotionVectorSpec mv_dst;
+        mv_dst.mv[0].x = 0;
+        mv_dst.mv[0].y = 0;
+        mv_dst.mv[1].x = 0;
+        mv_dst.mv[1].y = 0;
+        mv_dst.refIdx[0] = -1;
+        mv_dst.refIdx[1] = -1;
+        mv_dst.predFlag[0] = 0;
+        mv_dst.predFlag[1] = 0;
+        return mv_dst;
+      }
+    }
+    else
+      return pb_info.get(x,y).mv;
   }
 
-  void set_mv_info(int x,int y, int nPbW,int nPbH, const PredVectorInfo* mv);
+  void set_mv_info(int x,int y, int nPbW,int nPbH, const MotionVectorSpec& mv);
 
-// --- value logging ---
+  // --- value logging ---
 
+  void printBlk(int x0,int y0, int cIdx, int log2BlkSize);
 };
 
 

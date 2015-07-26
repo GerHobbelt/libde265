@@ -25,10 +25,11 @@
 #include <string.h>
 
 
-void apply_sao(de265_image* img, int xCtb,int yCtb,
-               const slice_segment_header* shdr, int cIdx, int nS,
-               const uint8_t* in_img,  int in_stride,
-               /* */ uint8_t* out_img, int out_stride)
+template <class pixel_t>
+void apply_sao_internal(de265_image* img, int xCtb,int yCtb,
+                        const slice_segment_header* shdr, int cIdx, int nS,
+                        const pixel_t* in_img,  int in_stride,
+                        /* */ pixel_t* out_img, int out_stride)
 {
   const sao_info* saoinfo = img->get_sao_info(xCtb,yCtb);
 
@@ -70,8 +71,7 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
   const int ctbH = (yC+nS>height) ? height-yC : nS;
 
 
-  const bool extendedTests = (img->get_CTB_has_pcm(xCtb,yCtb) ||
-                              img->get_CTB_has_cu_transquant_bypass(xCtb,yCtb));
+  const bool extendedTests = img->get_CTB_has_pcm_or_cu_transquant_bypass(xCtb,yCtb);
 
   if (SaoTypeIdx==2) {
     int hPos[2], vPos[2];
@@ -99,17 +99,17 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
 
 
     for (int j=0;j<ctbH;j++) {
-      const uint8_t* in_ptr  = &in_img [xC+(yC+j)*in_stride];
-      /* */ uint8_t* out_ptr = &out_img[xC+(yC+j)*out_stride];
+      const pixel_t* in_ptr  = &in_img [xC+(yC+j)*in_stride];
+      /* */ pixel_t* out_ptr = &out_img[xC+(yC+j)*out_stride];
 
       for (int i=0;i<ctbW;i++) {
         int edgeIdx = -1;
 
         logtrace(LogSAO, "pos %d,%d\n",xC+i,yC+j);
 
-        if (extendedTests &&
-            (sps->pcm_loop_filter_disable_flag &&
-             img->get_pcm_flag((xC+i)<<chromashift,(yC+j)<<chromashift)) ||
+        if ((extendedTests &&
+             (sps->pcm_loop_filter_disable_flag &&
+              img->get_pcm_flag((xC+i)<<chromashift,(yC+j)<<chromashift))) ||
             img->get_cu_transquant_bypass((xC+i)<<chromashift,(yC+j)<<chromashift)) {
           continue;
         }
@@ -133,7 +133,10 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
             // slice anyway) reduced computation time only by 1.3%.
             // TODO: however, this may still be a big part of SAO itself.
 
-            int sliceAddrRS = img->get_SliceHeader(xS<<chromashift,yS<<chromashift)->SliceAddrRS;
+            slice_segment_header* sliceHeader = img->get_SliceHeader(xS<<chromashift,yS<<chromashift);
+            if (sliceHeader==NULL) { return; }
+
+            int sliceAddrRS = sliceHeader->SliceAddrRS;
             if (sliceAddrRS <  ctbSliceAddrRS &&
                 img->get_SliceHeader((xC+i)<<chromashift,(yC+j)<<chromashift)->slice_loop_filter_across_slices_enabled_flag==0) {
               edgeIdx=0;
@@ -147,7 +150,7 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
             }
 
 
-            if (pps->loop_filter_across_tiles_enabled_flag==0 && 
+            if (pps->loop_filter_across_tiles_enabled_flag==0 &&
                 pps->TileIdRS[(xS>>ctbshift) + (yS>>ctbshift)*picWidthInCtbs] !=
                 pps->TileIdRS[(xC>>ctbshift) + (yC>>ctbshift)*picWidthInCtbs]) {
               edgeIdx=0;
@@ -205,6 +208,10 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
 
           int bandIdx = bandTable[ in_img[xC+i+(yC+j)*in_stride]>>bandShift ];
 
+          // Shifts are a strange thing. On x86, >>x actually computes >>(x%64).
+          // So we have to take care of large bandShifts.
+          if (bandShift>=8) { bandIdx=0; }
+
           if (bandIdx>0) {
             int offset = saoinfo->saoOffsetVal[cIdx][bandIdx-1];
 
@@ -212,7 +219,7 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
                      offset,
                      in_img[xC+i+(yC+j)*in_stride],
                      in_img[xC+i+(yC+j)*in_stride]+offset);
-          
+
             out_img[xC+i+(yC+j)*out_stride] = Clip3(0,maxPixelValue,
                                                     in_img[xC+i+(yC+j)*in_stride] + offset);
           }
@@ -227,6 +234,9 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
 
             int bandIdx = bandTable[ in_img[xC+i+(yC+j)*in_stride]>>bandShift ];
 
+            // see above
+            if (bandShift>=8) { bandIdx=0; }
+
             if (bandIdx>0) {
               int offset = saoinfo->saoOffsetVal[cIdx][bandIdx-1];
 
@@ -235,6 +245,25 @@ void apply_sao(de265_image* img, int xCtb,int yCtb,
             }
           }
       }
+  }
+}
+
+
+template <class pixel_t>
+void apply_sao(de265_image* img, int xCtb,int yCtb,
+               const slice_segment_header* shdr, int cIdx, int nS,
+               const pixel_t* in_img,  int in_stride,
+               /* */ pixel_t* out_img, int out_stride)
+{
+  if (img->high_bit_depth(cIdx)) {
+    apply_sao_internal<uint16_t>(img,xCtb,yCtb, shdr,cIdx,nS,
+                                 (uint16_t*)in_img, in_stride,
+                                 (uint16_t*)out_img,out_stride);
+  }
+  else {
+    apply_sao_internal<uint8_t>(img,xCtb,yCtb, shdr,cIdx,nS,
+                                in_img, in_stride,
+                                out_img,out_stride);
   }
 }
 
@@ -283,7 +312,8 @@ void apply_sample_adaptive_offset_sequential(de265_image* img)
   }
 
 
-  uint8_t* inputCopy = new uint8_t[ img->get_image_stride(0) * img->get_height(0) ];
+  uint8_t* inputCopy = new uint8_t[ img->get_image_stride(0) * img->get_height(0) *
+                                    img->get_bytes_per_pixel(0) ];
   if (inputCopy == NULL) {
     img->decctx->add_warning(DE265_WARNING_CANNOT_APPLY_SAO_OUT_OF_MEMORY,false);
     return;
@@ -295,12 +325,13 @@ void apply_sample_adaptive_offset_sequential(de265_image* img)
     int stride = img->get_image_stride(cIdx);
     int height = img->get_height(cIdx);
 
-    memcpy(inputCopy, img->get_image_plane(cIdx), stride * height);
+    memcpy(inputCopy, img->get_image_plane(cIdx), stride * height * img->get_bytes_per_pixel(cIdx));
 
     for (int yCtb=0; yCtb<img->sps.PicHeightInCtbsY; yCtb++)
       for (int xCtb=0; xCtb<img->sps.PicWidthInCtbsY; xCtb++)
         {
           const slice_segment_header* shdr = img->get_SliceHeaderCtb(xCtb,yCtb);
+          if (shdr==NULL) { return; }
 
           if (cIdx==0 && shdr->slice_sao_luma_flag) {
             apply_sao(img, xCtb,yCtb, shdr, 0, 1<<img->sps.Log2CtbSizeY,
@@ -335,13 +366,18 @@ public:
   int inputProgress;
 
   virtual void work();
+  virtual std::string name() const {
+    char buf[100];
+    sprintf(buf,"sao-%d",ctb_y);
+    return buf;
+  }
 };
 
 
 void thread_task_sao::work()
 {
   state = Running;
-  img->thread_run();
+  img->thread_run(this);
 
   const int rightCtb = img->sps.PicWidthInCtbsY-1;
   const int ctbSize  = (1<<img->sps.Log2CtbSizeY);
@@ -354,7 +390,7 @@ void thread_task_sao::work()
   if (ctb_y>0) {
     img->wait_for_progress(this, rightCtb,ctb_y-1, inputProgress);
   }
-  
+
   if (ctb_y+1<img->sps.PicHeightInCtbsY) {
     img->wait_for_progress(this, rightCtb,ctb_y+1, inputProgress);
   }
@@ -370,6 +406,9 @@ void thread_task_sao::work()
   for (int xCtb=0; xCtb<img->sps.PicWidthInCtbsY; xCtb++)
     {
       const slice_segment_header* shdr = img->get_SliceHeaderCtb(xCtb,ctb_y);
+      if (shdr==NULL) {
+        break;
+      }
 
       if (shdr->slice_sao_luma_flag) {
         apply_sao(img, xCtb,ctb_y, shdr, 0, ctbSize,
@@ -398,7 +437,7 @@ void thread_task_sao::work()
 
 
   state = Finished;
-  img->thread_finishes();
+  img->thread_finishes(this);
 }
 
 
@@ -415,7 +454,8 @@ bool add_sao_tasks(image_unit* imgunit, int saoInputProgress)
 
   de265_error err = imgunit->sao_output.alloc_image(img->get_width(), img->get_height(),
                                                     img->get_chroma_format(), &img->sps, false,
-                                                    img->decctx, img->pts, img->user_data, true);
+                                                    img->decctx, img->encctx,
+                                                    img->pts, img->user_data, true);
   if (err != DE265_OK) {
     img->decctx->add_warning(DE265_WARNING_CANNOT_APPLY_SAO_OUT_OF_MEMORY,false);
     return false;
@@ -426,7 +466,7 @@ bool add_sao_tasks(image_unit* imgunit, int saoInputProgress)
   int n=0;
   img->thread_start(nRows);
 
-  for (int y=0;y<img->sps.PicHeightInCtbsY;y++)
+  for (int y=0;y<nRows;y++)
     {
       thread_task_sao* task = new thread_task_sao;
 
@@ -437,7 +477,7 @@ bool add_sao_tasks(image_unit* imgunit, int saoInputProgress)
       task->inputProgress = saoInputProgress;
 
       imgunit->tasks.push_back(task);
-      add_task(&ctx->thread_pool, task);
+      add_task(&ctx->thread_pool_, task);
       n++;
     }
 

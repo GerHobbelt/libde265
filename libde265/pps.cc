@@ -34,7 +34,7 @@
 
 pic_parameter_set::pic_parameter_set()
 {
-  pps_read = false;
+  reset();
 }
 
 
@@ -43,9 +43,87 @@ pic_parameter_set::~pic_parameter_set()
 }
 
 
+void pic_parameter_set::set_defaults(enum PresetSet)
+{
+  pps_read = false;
+
+  pic_parameter_set_id = 0;
+  seq_parameter_set_id = 0;
+  dependent_slice_segments_enabled_flag = 0;
+  sign_data_hiding_flag = 0;
+  cabac_init_present_flag = 0;
+  num_ref_idx_l0_default_active = 1;
+  num_ref_idx_l1_default_active = 1;
+
+  pic_init_qp = 27;
+  constrained_intra_pred_flag = 0;
+  transform_skip_enabled_flag = 0;
+
+  cu_qp_delta_enabled_flag = 0;
+  diff_cu_qp_delta_depth = 0;
+
+  pic_cb_qp_offset = 0;
+  pic_cr_qp_offset = 0;
+  pps_slice_chroma_qp_offsets_present_flag = 0;
+  weighted_pred_flag  = 0;
+  weighted_bipred_flag= 0;
+  output_flag_present_flag = 0;
+  transquant_bypass_enable_flag = 0;
+  entropy_coding_sync_enabled_flag = 0;
+
+  // --- tiles ---
+
+  tiles_enabled_flag = 0;
+  num_tile_columns = 1;
+  num_tile_rows    = 1;
+  uniform_spacing_flag = 1;
+
+
+  // --- ---
+
+  loop_filter_across_tiles_enabled_flag = 1;
+  pps_loop_filter_across_slices_enabled_flag = 1;
+
+  for (int i=0;i<DE265_MAX_TILE_COLUMNS;i++) { colWidth[i]=0; }
+  for (int i=0;i<DE265_MAX_TILE_ROWS;i++)    { rowHeight[i]=0; }
+  for (int i=0;i<=DE265_MAX_TILE_COLUMNS;i++) { colBd[i]=0; }
+  for (int i=0;i<=DE265_MAX_TILE_ROWS;i++)    { rowBd[i]=0; }
+
+  CtbAddrRStoTS.clear();
+  CtbAddrTStoRS.clear();
+  TileId.clear();
+  TileIdRS.clear();
+  MinTbAddrZS.clear();
+
+
+  Log2MinCuQpDeltaSize = 0;
+
+  deblocking_filter_control_present_flag = 0;
+  deblocking_filter_override_enabled_flag = 0;
+  pic_disable_deblocking_filter_flag = 0;
+
+  beta_offset = 0;
+  tc_offset   = 0;
+
+  pic_scaling_list_data_present_flag = 0;
+  // TODO struct scaling_list_data scaling_list;
+
+  lists_modification_present_flag = 0;
+  log2_parallel_merge_level = 2;
+
+  num_extra_slice_header_bits = 0;
+  slice_segment_header_extension_present_flag = 0;
+
+  pps_extension_present_flag = false;
+  pps_range_extension_flag = false;
+  pps_multilayer_extension_flag = false;
+}
+
+
 bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 {
-  pps_read = false; // incomplete pps
+  reset();
+
 
   int uvlc;
   pic_parameter_set_id = uvlc = get_uvlc(br);
@@ -162,6 +240,10 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
           lastColumnWidth -= colWidth[i];
         }
 
+      if (lastColumnWidth <= 0) {
+        return false;
+      }
+
       colWidth[num_tile_columns-1] = lastColumnWidth;
 
       for (int i=0; i<num_tile_rows-1; i++)
@@ -174,6 +256,11 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
           rowHeight[i]++;
           lastRowHeight -= rowHeight[i];
         }
+
+      if (lastRowHeight <= 0) {
+        return false;
+      }
+
 
       rowHeight[num_tile_rows-1] = lastRowHeight;
     }
@@ -188,6 +275,115 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
   }
 
 
+
+  // END tiles
+
+
+
+  beta_offset = 0; // default value
+  tc_offset   = 0; // default value
+
+  pps_loop_filter_across_slices_enabled_flag = get_bits(br,1);
+  deblocking_filter_control_present_flag = get_bits(br,1);
+  if (deblocking_filter_control_present_flag) {
+    deblocking_filter_override_enabled_flag = get_bits(br,1);
+    pic_disable_deblocking_filter_flag = get_bits(br,1);
+    if (!pic_disable_deblocking_filter_flag) {
+      beta_offset = get_svlc(br);
+      if (beta_offset == UVLC_ERROR) {
+	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+	return false;
+      }
+      beta_offset *= 2;
+
+      tc_offset   = get_svlc(br);
+      if (tc_offset == UVLC_ERROR) {
+	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+	return false;
+      }
+      tc_offset   *= 2;
+    }
+  }
+  else {
+    deblocking_filter_override_enabled_flag = 0;
+    pic_disable_deblocking_filter_flag = 0;
+  }
+
+
+  // --- scaling list ---
+
+  pic_scaling_list_data_present_flag = get_bits(br,1);
+
+  // check consistency: if scaling-lists are not enabled, pic_scalign_list_data_present_flag
+  // must be FALSE
+  if (sps->scaling_list_enable_flag==0 &&
+      pic_scaling_list_data_present_flag != 0) {
+    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+    return false;
+  }
+
+  if (pic_scaling_list_data_present_flag) {
+    de265_error err = read_scaling_list(br, sps, &scaling_list, true);
+    if (err != DE265_OK) {
+      ctx->add_warning(err, false);
+      return false;
+    }
+  }
+  else {
+    memcpy(&scaling_list, &sps->scaling_list, sizeof(scaling_list_data));
+  }
+
+
+
+
+  lists_modification_present_flag = get_bits(br,1);
+  log2_parallel_merge_level = get_uvlc(br);
+  if (log2_parallel_merge_level == UVLC_ERROR) {
+    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+    return false;
+  }
+  log2_parallel_merge_level += 2;
+
+  if (log2_parallel_merge_level-2 > sps->log2_min_luma_coding_block_size-3 +1 +
+      sps->log2_diff_max_min_luma_coding_block_size) {
+    return false;
+  }
+
+  slice_segment_header_extension_present_flag = get_bits(br,1);
+  pps_extension_present_flag = get_bits(br,1);
+
+  if (pps_extension_present_flag) {
+    pps_range_extension_flag = get_bits(br,1);
+    pps_multilayer_extension_flag = get_bits(br,1);
+    pps_extension_6bits = get_bits(br,6);
+  }
+  else {
+    pps_range_extension_flag = false;
+    pps_multilayer_extension_flag = false;
+    pps_extension_6bits = 0;
+  }
+
+  if (pps_range_extension_flag) {
+    pps_range_ext.read(br, transform_skip_enabled_flag);
+  }
+  if (pps_multilayer_extension_flag) {
+    pps_mult_ext.read(br);
+  }
+  if (pps_extension_6bits != 0) {
+    // The remaining bits in the PPS are pps_extension_data_flag flags
+  }
+
+  set_derived_values(sps);
+
+  pps_read = true;
+
+  return true;
+}
+
+
+void pic_parameter_set::set_derived_values(const seq_parameter_set* sps)
+{
+  Log2MinCuQpDeltaSize = sps->Log2CtbSizeY - diff_cu_qp_delta_depth;
 
   if (uniform_spacing_flag) {
 
@@ -278,6 +474,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
     }
 
 
+#if 0
   logtrace(LogHeaders,"6.5.1 CtbAddrRSToTS\n");
   for (int y=0;y<sps->PicHeightInCtbsY;y++)
     {
@@ -288,7 +485,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 
       logtrace(LogHeaders,"\n");
     }
-
+#endif
 
   // tile id
 
@@ -306,6 +503,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
         tIdx++;
       }
 
+#if 0
   logtrace(LogHeaders,"Tile IDs RS:\n");
   for (int y=0;y<sps->PicHeightInCtbsY;y++) {
     for (int x=0;x<sps->PicWidthInCtbsY;x++) {
@@ -313,6 +511,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
     }
     logtrace(LogHeaders,"\n");
   }
+#endif
 
   // 6.5.2 Z-scan order array initialization process
 
@@ -363,81 +562,129 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
     }
     }
   */
-
-  // END tiles
-
-
-  Log2MinCuQpDeltaSize = sps->Log2CtbSizeY - diff_cu_qp_delta_depth;
+}
 
 
-  beta_offset = 0; // default value
-  tc_offset   = 0; // default value
-
-  pps_loop_filter_across_slices_enabled_flag = get_bits(br,1);
-  deblocking_filter_control_present_flag = get_bits(br,1);
-  if (deblocking_filter_control_present_flag) {
-    deblocking_filter_override_enabled_flag = get_bits(br,1);
-    pic_disable_deblocking_filter_flag = get_bits(br,1);
-    if (!pic_disable_deblocking_filter_flag) {
-      beta_offset = get_svlc(br);
-      if (beta_offset == UVLC_ERROR) {
-	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	return false;
-      }
-      beta_offset *= 2;
-
-      tc_offset   = get_svlc(br);
-      if (tc_offset == UVLC_ERROR) {
-	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	return false;
-      }
-      tc_offset   *= 2;
-    }
+bool pic_parameter_set::write(error_queue* errqueue, CABAC_encoder& out,
+                              const seq_parameter_set* sps)
+{
+  if (pic_parameter_set_id >= DE265_MAX_PPS_SETS) {
+    errqueue->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
+    return false;
   }
-  else {
-    deblocking_filter_override_enabled_flag = 0;
-    pic_disable_deblocking_filter_flag = 0;
+  out.write_uvlc(pic_parameter_set_id);
+
+  if (seq_parameter_set_id >= DE265_MAX_PPS_SETS) {
+    errqueue->add_warning(DE265_WARNING_NONEXISTING_SPS_REFERENCED, false);
+    return false;
+  }
+  out.write_uvlc(seq_parameter_set_id);
+
+  out.write_bit(dependent_slice_segments_enabled_flag);
+  out.write_bit(output_flag_present_flag);
+  out.write_bits(num_extra_slice_header_bits,3);
+  out.write_bit(sign_data_hiding_flag);
+  out.write_bit(cabac_init_present_flag);
+  out.write_uvlc(num_ref_idx_l0_default_active-1);
+  out.write_uvlc(num_ref_idx_l1_default_active-1);
+
+  out.write_svlc(pic_init_qp-26);
+
+  out.write_bit(constrained_intra_pred_flag);
+  out.write_bit(transform_skip_enabled_flag);
+  out.write_bit(cu_qp_delta_enabled_flag);
+
+  if (cu_qp_delta_enabled_flag) {
+    out.write_uvlc(diff_cu_qp_delta_depth);
+  }
+
+  out.write_svlc(pic_cb_qp_offset);
+  out.write_svlc(pic_cr_qp_offset);
+
+  out.write_bit(pps_slice_chroma_qp_offsets_present_flag);
+  out.write_bit(weighted_pred_flag);
+  out.write_bit(weighted_bipred_flag);
+  out.write_bit(transquant_bypass_enable_flag);
+  out.write_bit(tiles_enabled_flag);
+  out.write_bit(entropy_coding_sync_enabled_flag);
+
+
+  // --- tiles ---
+
+  if (tiles_enabled_flag) {
+    if (num_tile_columns > DE265_MAX_TILE_COLUMNS) {
+      errqueue->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
+    }
+    out.write_uvlc(num_tile_columns-1);
+
+    if (num_tile_rows > DE265_MAX_TILE_ROWS) {
+      errqueue->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
+    }
+    out.write_uvlc(num_tile_rows-1);
+
+    out.write_bit(uniform_spacing_flag);
+
+    if (uniform_spacing_flag==false) {
+      for (int i=0; i<num_tile_columns-1; i++)
+        {
+          out.write_uvlc(colWidth[i]-1);
+        }
+
+      for (int i=0; i<num_tile_rows-1; i++)
+        {
+          out.write_uvlc(rowHeight[i]-1);
+        }
+    }
+
+    out.write_bit(loop_filter_across_tiles_enabled_flag);
+  }
+
+
+  out.write_bit(pps_loop_filter_across_slices_enabled_flag);
+  out.write_bit(deblocking_filter_control_present_flag);
+
+  if (deblocking_filter_control_present_flag) {
+    out.write_bit(deblocking_filter_override_enabled_flag);
+    out.write_bit(pic_disable_deblocking_filter_flag);
+
+    if (!pic_disable_deblocking_filter_flag) {
+      out.write_svlc(beta_offset/2);
+      out.write_svlc(tc_offset  /2);
+    }
   }
 
 
   // --- scaling list ---
 
-  pic_scaling_list_data_present_flag = get_bits(br,1);
+  out.write_bit(pic_scaling_list_data_present_flag);
 
   // check consistency: if scaling-lists are not enabled, pic_scalign_list_data_present_flag
   // must be FALSE
   if (sps->scaling_list_enable_flag==0 &&
       pic_scaling_list_data_present_flag != 0) {
-    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+    errqueue->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
 
   if (pic_scaling_list_data_present_flag) {
-    de265_error err = read_scaling_list(br, sps, &scaling_list, true);
+    de265_error err = write_scaling_list(out, sps, &scaling_list, true);
     if (err != DE265_OK) {
-      ctx->add_warning(err, false);
+      errqueue->add_warning(err, false);
       return false;
     }
   }
-  else {
-    memcpy(&scaling_list, &sps->scaling_list, sizeof(scaling_list_data));
-  }
 
 
 
+  out.write_bit(lists_modification_present_flag);
+  out.write_uvlc(log2_parallel_merge_level-2);
 
-  lists_modification_present_flag = get_bits(br,1);
-  log2_parallel_merge_level = get_uvlc(br);
-  if (log2_parallel_merge_level == UVLC_ERROR) {
-    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-    return false;
-  }
-  log2_parallel_merge_level += 2;
+  out.write_bit(slice_segment_header_extension_present_flag);
+  out.write_bit(pps_extension_present_flag);
 
-  slice_segment_header_extension_present_flag = get_bits(br,1);
-  pps_extension_flag = get_bits(br,1);
-
-  if (pps_extension_flag) {
+  if (pps_extension_present_flag) {
     //assert(false);
     /*
       while( more_rbsp_data() )
@@ -457,7 +704,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 }
 
 
-void pic_parameter_set::dump_pps(int fd) const
+void pic_parameter_set::dump(int fd) const
 {
   FILE* fh;
   if (fd==1) fh=stdout;
@@ -548,7 +795,7 @@ void pic_parameter_set::dump_pps(int fd) const
   LOG1("log2_parallel_merge_level      : %d\n", log2_parallel_merge_level);
   LOG1("num_extra_slice_header_bits    : %d\n", num_extra_slice_header_bits);
   LOG1("slice_segment_header_extension_present_flag : %d\n", slice_segment_header_extension_present_flag);
-  LOG1("pps_extension_flag : %d\n", pps_extension_flag);
+  LOG1("pps_extension_flag : %d\n", pps_extension_present_flag);
 
   LOG1("Log2MinCuQpDeltaSize : %d\n", Log2MinCuQpDeltaSize);
 
@@ -577,4 +824,147 @@ bool pic_parameter_set::is_tile_start_CTB(int ctbX,int ctbY) const
       }
 
   return false;
+}
+
+bool pic_parameter_set_range_extension::read(bitreader* reader, bool transform_skip_enabled_flag)
+{
+  if (transform_skip_enabled_flag) {
+    log2_max_transform_skip_block_size_minus2 = get_uvlc(reader);
+  }
+  cross_component_prediction_enabled_flag = get_bits(reader,1);
+  chroma_qp_offset_list_enabled_flag = get_bits(reader,1);
+  if( chroma_qp_offset_list_enabled_flag ) {
+    diff_cu_chroma_qp_offset_depth = get_uvlc(reader);
+    chroma_qp_offset_list_len_minus1 = get_uvlc(reader);
+    for( int i = 0; i  <=  chroma_qp_offset_list_len_minus1; i++ ) {
+      cb_qp_offset_list[i] = get_svlc(reader);
+      cr_qp_offset_list[i] = get_svlc(reader);
+    }
+  }
+  log2_sao_offset_scale_luma = get_uvlc(reader);
+  log2_sao_offset_scale_chroma = get_uvlc(reader);
+
+  return true;
+}
+
+bool pps_multilayer_extension::read(bitreader* reader)
+{
+  poc_reset_info_present_flag = get_bits(reader,1);
+  pps_infer_scaling_list_flag = get_bits(reader,1);
+  if (pps_infer_scaling_list_flag) {
+    pps_scaling_list_ref_layer_id = get_bits(reader,6);
+  }
+  num_ref_loc_offsets = get_uvlc(reader);
+  for( int i = 0; i < num_ref_loc_offsets; i++ ) {
+    ref_loc_offset_layer_id[ i ] = get_bits(reader,6);
+    scaled_ref_layer_offset_present_flag[ i ] = get_bits(reader,1);
+    if( scaled_ref_layer_offset_present_flag[ i ] ) {
+      scaled_ref_layer_left_offset[ref_loc_offset_layer_id[ i ]] = get_svlc(reader);
+      scaled_ref_layer_top_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+      scaled_ref_layer_right_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+      scaled_ref_layer_bottom_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+    }
+    ref_region_offset_present_flag[ i ] = get_bits(reader,1);
+    if( ref_region_offset_present_flag[ i ] ) {
+      ref_region_left_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+      ref_region_top_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+      ref_region_right_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+      ref_region_bottom_offset[ ref_loc_offset_layer_id[ i ] ] = get_svlc(reader);
+    }
+    resample_phase_set_present_flag[ i ] = get_bits(reader,1);
+    if( resample_phase_set_present_flag[ i ] ) {
+      phase_hor_luma[ ref_loc_offset_layer_id[ i ] ] = get_uvlc(reader);
+      phase_ver_luma[ ref_loc_offset_layer_id[ i ] ] = get_uvlc(reader);
+      phase_hor_chroma[ ref_loc_offset_layer_id[ i ] ] = get_uvlc(reader) - 8;  // phase_hor_chroma_plus8
+      phase_ver_chroma[ ref_loc_offset_layer_id[ i ] ] = get_uvlc(reader) - 8;  // phase_ver_chroma_plus8
+    }
+  }
+  colour_mapping_enabled_flag = get_bits(reader,1);
+  if (colour_mapping_enabled_flag) {
+    cm_table.read(reader);
+  }
+
+  return true;
+}
+
+bool colour_mapping_table::read(bitreader* reader)
+{
+  num_cm_ref_layers_minus1 = get_uvlc(reader);
+  for (int i = 0; i <= num_cm_ref_layers_minus1; i++) {
+    cm_ref_layer_id[ i ] = get_bits(reader,6);
+  }
+  cm_octant_depth = get_bits(reader,2);
+  cm_y_part_num_log2 = get_bits(reader,2);
+  int PartNumY = 1 << cm_y_part_num_log2;
+  luma_bit_depth_cm_input_minus8 = get_uvlc(reader);
+  chroma_bit_depth_cm_input_minus8 = get_uvlc(reader);
+  luma_bit_depth_cm_output_minus8 = get_uvlc(reader);
+  chroma_bit_depth_cm_output_minus8 = get_uvlc(reader);
+  cm_res_quant_bits = get_bits(reader,2);
+  cm_delta_flc_bits_minus1 = get_bits(reader,2);
+
+  BitDepthCmInputY = 8 + luma_bit_depth_cm_input_minus8;
+  BitDepthCmOutputY = 8 + luma_bit_depth_cm_output_minus8;
+  BitDepthCmInputC = 8 + chroma_bit_depth_cm_input_minus8;
+  BitDepthCmOutputC = 8 + chroma_bit_depth_cm_output_minus8;
+  CMThreshU = cm_adapt_threshold_u_delta + (1 << (BitDepthCmInputC - 1)); // (F 48)
+  CMThreshV = cm_adapt_threshold_v_delta + (1 << (BitDepthCmInputC - 1)); // (F 49)
+
+  int CMResLSBits = libde265_max( 0, ( 10 + BitDepthCmInputY - BitDepthCmOutputY - cm_res_quant_bits - ( cm_delta_flc_bits_minus1 + 1 ) ) );
+
+  if( cm_octant_depth == 1 ) {
+    cm_adapt_threshold_u_delta = get_svlc(reader);
+    cm_adapt_threshold_v_delta = get_svlc(reader);
+  }
+  cm_octans.read(reader, 0, 0, 0, 0, 1 << cm_octant_depth, cm_octant_depth, PartNumY, CMResLSBits );
+
+  return true;
+}
+
+bool colour_mapping_octants::read(bitreader* reader, int inpDepth, int idxY, int idxCb, int idxCr, int inpLength, int cm_octant_depth, int PartNumY, int CMResLSBits)
+{
+  _inpDepth = inpDepth;
+  _idxY = idxY;
+  _idxCb = idxCb;
+  _idxCr = idxCr;
+  _inpLength = inpLength;
+
+  if( inpDepth < cm_octant_depth )
+    split_octant_flag = get_bits(reader,1);
+  else
+    split_octant_flag = false;
+
+  if (split_octant_flag) {
+    for( int k = 0; k < 2; k++ )
+      for( int m = 0; m < 2; m++ )
+        for (int n = 0; n < 2; n++) {
+          colour_mapping_octants new_oct;
+          new_oct.read(reader, inpDepth+1, idxY + PartNumY * k * inpLength / 2,idxCb + m * inpLength / 2, idxCr + n * inpLength / 2, inpLength / 2, cm_octant_depth, PartNumY, CMResLSBits);
+          sub_octans.push_back( new_oct );
+        }
+  }
+  else {
+    for( int i = 0; i < PartNumY; i++ ) {
+      int idxShiftY = idxY + ( i << ( cm_octant_depth - inpDepth ) );
+      for( int j = 0; j < 4; j++ ) {
+        coded_res_flag[ j ] = get_bits(reader,1);
+        if (coded_res_flag[j]) {
+          for( int c = 0; c < 3; c++ ) {
+            res_coeff_q[ j ][ c ] = get_uvlc(reader);
+            int nr_bits = CMResLSBits;
+            res_coeff_r[ j ][ c ] = get_bits(reader,nr_bits);
+            if (res_coeff_q[j][c] || res_coeff_r[j][c]) {
+              res_coeff_s[ j ][ c ] = get_bits(reader,1);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // TODO: Rewrite.
+  // TODO: Calculate LUT (see F.7.4.3.3.5)
+  // LutY, LutCb, LutCr
+
+  return true;
 }

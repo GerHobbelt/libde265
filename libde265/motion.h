@@ -23,6 +23,8 @@
 
 #include <stdint.h>
 
+class base_context;
+class slice_segment_header;
 
 typedef struct
 {
@@ -32,23 +34,63 @@ typedef struct
 
 typedef struct
 {
-   int8_t refIdx[2];
-  uint8_t predFlag[2];
-  MotionVector mv[2];
-} PredVectorInfo;
+  uint8_t predFlag[2];  // which of the two vectors is actually used
+   int8_t   refIdx[2];
+  MotionVector  mv[2];
+} MotionVectorSpec;
 
 
-typedef struct
-{
-  PredVectorInfo lum;
-  MotionVector mvC[2];
-} VectorInfo;
+typedef struct {
+  int8_t  refIdx[2];
+  int16_t mvd[2][2]; // [L0/L1][x/y]  (only in top left position - ???)
+
+  uint8_t inter_pred_idc : 2; // enum InterPredIdc
+  uint8_t mvp_l0_flag : 1;
+  uint8_t mvp_l1_flag : 1;
+  uint8_t merge_flag : 1;
+  uint8_t merge_idx  : 3;
+} motion_spec;
 
 
-void decode_prediction_unit(struct thread_context* shdr,
+void get_merge_candidate_list(base_context* ctx,
+                              const slice_segment_header* shdr,
+                              class de265_image* img,
+                              int xC,int yC, int xP,int yP,
+                              int nCS, int nPbW,int nPbH, int partIdx,
+                              MotionVectorSpec* mergeCandList);
+
+/*
+int derive_spatial_merging_candidates(const struct de265_image* img,
+                                      int xC, int yC, int nCS, int xP, int yP,
+                                      uint8_t singleMCLFlag,
+                                      int nPbW, int nPbH,
+                                      int partIdx,
+                                      MotionVectorSpec* out_cand,
+                                      int maxCandidates);
+*/
+
+void generate_inter_prediction_samples(base_context* ctx,
+                                       const slice_segment_header* shdr,
+                                       struct de265_image* img,
+                                       int xC,int yC,
+                                       int xB,int yB,
+                                       int nCS, int nPbW,int nPbH,
+                                       const MotionVectorSpec* vi);
+
+
+/* Fill list (two entries) of motion-vector predictors for MVD coding.
+ */
+void fill_luma_motion_vector_predictors(base_context* ctx,
+                                        const slice_segment_header* shdr,
+                                        de265_image* img,
+                                        int xC,int yC,int nCS,int xP,int yP,
+                                        int nPbW,int nPbH, int l,
+                                        int refIdx, int partIdx,
+                                        MotionVector out_mvpList[2]);
+
+
+void decode_prediction_unit(base_context* ctx,const slice_segment_header* shdr,
+                            de265_image* img, const motion_spec& motion,
                             int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH, int partIdx);
-
-void inter_prediction(struct decoder_context* ctx,struct slice_segment_header* shdr,
-                      int xC,int yC, int log2CbSize);
 
 #endif

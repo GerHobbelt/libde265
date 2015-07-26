@@ -110,6 +110,11 @@ void skip_bits_fast(bitreader* br, int n)
   br->nextbits_cnt -= n;
 }
 
+int bits_to_byte_boundary(bitreader* br)
+{
+  return (br->nextbits_cnt & 7);
+}
+
 void skip_to_byte_boundary(bitreader* br)
 {
   int nskip = (br->nextbits_cnt & 7);
@@ -129,28 +134,34 @@ void prepare_for_CABAC(bitreader* br)
   br->nextbits_cnt = 0;
 }
 
-int  get_uvlc(bitreader* br)
+int  get_uvlc(bitreader* br, int *nrBitsRead)
 {
   int num_zeros=0;
+  if (nrBitsRead) *nrBitsRead = 0;
 
   while (get_bits(br,1)==0) {
     num_zeros++;
+    if (nrBitsRead) (*nrBitsRead)++;
 
     if (num_zeros > MAX_UVLC_LEADING_ZEROS) { return UVLC_ERROR; }
   }
+  if (nrBitsRead) (*nrBitsRead)++;
 
   int offset = 0;
   if (num_zeros != 0) {
     offset = get_bits(br, num_zeros);
-    return offset + (1<<num_zeros)-1;
+    if (nrBitsRead) *nrBitsRead += num_zeros;
+    int value = offset + (1<<num_zeros)-1;
+    assert(value>0);
+    return value;
   } else {
     return 0;
   }
 }
 
-int  get_svlc(bitreader* br)
+int  get_svlc(bitreader* br, int* nrBitsRead)
 {
-  int v = get_uvlc(br);
+  int v = get_uvlc(br, nrBitsRead);
   if (v==0) return v;
   if (v==UVLC_ERROR) return UVLC_ERROR;
 

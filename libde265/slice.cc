@@ -29,6 +29,7 @@
 #include "transform.h"
 #include "threads.h"
 #include "image.h"
+#include "decctx-multilayer.h"
 
 #include <assert.h>
 #include <string.h>
@@ -38,7 +39,7 @@
 #define LOCK de265_mutex_lock(&ctx->thread_pool.mutex)
 #define UNLOCK de265_mutex_unlock(&ctx->thread_pool.mutex)
 
-extern bool read_short_term_ref_pic_set(decoder_context* ctx,
+extern bool read_short_term_ref_pic_set(error_queue* errqueue,
                                         const seq_parameter_set* sps,
                                         bitreader* br,
                                         ref_pic_set* out_set,
@@ -52,13 +53,94 @@ void read_coding_quadtree(thread_context* tctx,
                           int xCtb, int yCtb,
                           int Log2CtbSizeY,
                           int ctDepth);
-int check_CTB_available(de265_image* img,
-                        slice_segment_header* shdr,
-                        int xC,int yC, int xN,int yN);
 /*
 void decode_inter_block(decoder_context* ctx,thread_context* tctx,
                         int xC, int yC, int log2CbSize);
 */
+
+void slice_segment_header::set_defaults()
+{
+  slice_index = 0;
+
+  first_slice_segment_in_pic_flag = 1;
+  no_output_of_prior_pics_flag = 0;
+  slice_pic_parameter_set_id = 0;
+  dependent_slice_segment_flag = 0;
+  slice_segment_address = 0;
+
+  slice_type = SLICE_TYPE_I;
+  pic_output_flag = 1;
+  colour_plane_id = 0;
+  slice_pic_order_cnt_lsb = 0;
+  short_term_ref_pic_set_sps_flag = 1;
+  // ref_pic_set slice_ref_pic_set;
+
+  short_term_ref_pic_set_idx = 0;
+  num_long_term_sps = 0;
+  num_long_term_pics = 0;
+
+  //uint8_t lt_idx_sps[MAX_NUM_REF_PICS];
+  //int     poc_lsb_lt[MAX_NUM_REF_PICS];
+  //char    used_by_curr_pic_lt_flag[MAX_NUM_REF_PICS];
+
+  //char delta_poc_msb_present_flag[MAX_NUM_REF_PICS];
+  //int delta_poc_msb_cycle_lt[MAX_NUM_REF_PICS];
+
+  slice_temporal_mvp_enabled_flag = 0;
+  slice_sao_luma_flag = 0;
+  slice_sao_chroma_flag = 0;
+
+  num_ref_idx_active_override_flag = 0;
+  num_ref_idx_l0_active=1; // [1;16]
+  num_ref_idx_l1_active=1; // [1;16]
+
+  ref_pic_list_modification_flag_l0 = 0;
+  ref_pic_list_modification_flag_l1 = 0;
+  //uint8_t list_entry_l0[16];
+  //uint8_t list_entry_l1[16];
+
+  mvd_l1_zero_flag = 0;
+  cabac_init_flag = 0;
+  collocated_from_l0_flag = 0;
+  collocated_ref_idx = 0;
+
+  // --- pred_weight_table ---
+
+  luma_log2_weight_denom=0; // [0;7]
+  ChromaLog2WeightDenom=0;  // [0;7]
+
+  // first index is L0/L1
+  uint8_t luma_weight_flag[2][16];   // bool
+  uint8_t chroma_weight_flag[2][16]; // bool
+  int16_t LumaWeight[2][16];
+  int8_t  luma_offset[2][16];
+  int16_t ChromaWeight[2][16][2];
+  int8_t  ChromaOffset[2][16][2];
+
+
+  five_minus_max_num_merge_cand = 0;
+  slice_qp_delta = 0;
+
+  slice_cb_qp_offset = 0;
+  slice_cr_qp_offset = 0;
+
+  deblocking_filter_override_flag = 0;
+  slice_deblocking_filter_disabled_flag = 0;
+  slice_beta_offset=0; // = pps->beta_offset if undefined
+  slice_tc_offset=0;   // = pps->tc_offset if undefined
+
+  slice_loop_filter_across_slices_enabled_flag = 0;
+
+  num_entry_point_offsets = 0;
+  //int  offset_len;
+  //std::vector<int> entry_point_offset;
+
+  poc_msb_cycle_val_present_flag = 0;
+  slice_segment_header_extension_length = 0;
+
+  SliceAddrRS = slice_segment_address;
+}
+
 
 bool read_pred_weight_table(bitreader* br, slice_segment_header* shdr, decoder_context* ctx)
 {
@@ -153,15 +235,129 @@ bool read_pred_weight_table(bitreader* br, slice_segment_header* shdr, decoder_c
 }
 
 
+void slice_segment_header::reset()
+{
+  slice_index = 0;
+
+  first_slice_segment_in_pic_flag = 0;
+  no_output_of_prior_pics_flag = 0;
+  slice_pic_parameter_set_id = 0;
+  dependent_slice_segment_flag = 0;
+  slice_segment_address = 0;
+
+  slice_type = 0;
+  pic_output_flag = 0;
+  colour_plane_id = 0;
+  slice_pic_order_cnt_lsb = 0;
+  short_term_ref_pic_set_sps_flag = 0;
+  slice_ref_pic_set.reset();
+
+  short_term_ref_pic_set_idx = 0;
+  num_long_term_sps = 0;
+  num_long_term_pics= 0;
+
+  for (int i=0;i<MAX_NUM_REF_PICS;i++) {
+    lt_idx_sps[i] = 0;
+    poc_lsb_lt[i] = 0;
+    used_by_curr_pic_lt_flag[i] = 0;
+    delta_poc_msb_present_flag[i] = 0;
+    delta_poc_msb_cycle_lt[i] = 0;
+  }
+
+  slice_temporal_mvp_enabled_flag = 0;
+  slice_sao_luma_flag = 0;
+  slice_sao_chroma_flag = 0;
+
+  num_ref_idx_active_override_flag = 0;
+  num_ref_idx_l0_active = 0;
+  num_ref_idx_l1_active = 0;
+
+  ref_pic_list_modification_flag_l0 = 0;
+  ref_pic_list_modification_flag_l1 = 0;
+  for (int i=0;i<16;i++) {
+    list_entry_l0[i] = 0;
+    list_entry_l1[i] = 0;
+  }
+
+  mvd_l1_zero_flag = 0;
+  cabac_init_flag  = 0;
+  collocated_from_l0_flag = 0;
+  collocated_ref_idx = 0;
+
+  luma_log2_weight_denom = 0;
+  ChromaLog2WeightDenom  = 0;
+
+  for (int i=0;i<2;i++)
+    for (int j=0;j<16;j++) {
+      luma_weight_flag[i][j] = 0;
+      chroma_weight_flag[i][j] = 0;
+      LumaWeight[i][j] = 0;
+      luma_offset[i][j] = 0;
+      ChromaWeight[i][j][0] = ChromaWeight[i][j][1] = 0;
+      ChromaOffset[i][j][0] = ChromaOffset[i][j][1] = 0;
+    }
+
+  five_minus_max_num_merge_cand = 0;
+  slice_qp_delta = 0;
+
+  slice_cb_qp_offset = 0;
+  slice_cr_qp_offset = 0;
+
+  deblocking_filter_override_flag = 0;
+  slice_deblocking_filter_disabled_flag = 0;
+  slice_beta_offset = 0;
+  slice_tc_offset = 0;
+
+  slice_loop_filter_across_slices_enabled_flag = 0;
+
+  num_entry_point_offsets = 0;
+  offset_len = 0;
+  entry_point_offset.clear();
+
+  slice_segment_header_extension_length = 0;
+
+  SliceAddrRS = 0;
+  SliceQPY = 0;
+
+  initType = 0;
+
+  MaxNumMergeCand = 0;
+  CurrRpsIdx = 0;
+  CurrRps.reset();
+  NumPocTotalCurr = 0;
+  NumActiveRefLayerPics = 0;
+
+  for (int i=0;i<2;i++)
+    for (int j=0;j<MAX_NUM_REF_PICS;j++) {
+      RefPicList[i][j] = 0;
+      RefPicList_POC[i][j] = 0;
+      RefPicList_PicState[i][j] = 0;
+      LongTermRefPic[i][j] = 0;
+      InterLayerRefPic[i][j] = false;
+    }
+
+  //context_model ctx_model_storage[CONTEXT_MODEL_TABLE_LENGTH];
+
+  RemoveReferencesList.clear();
+
+  ctx_model_storage_defined = false;
+}
+
+
 de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
-                                       bool* continueDecoding)
+                                       bool* continueDecoding, nal_header nal_hdr)
 {
   *continueDecoding = false;
+  reset();
 
   // set defaults
 
   dependent_slice_segment_flag = 0;
 
+  // Get NAL unit type and layer ID
+  int nal_unit_type = nal_hdr.nal_unit_type;
+  int nuh_layer_id =  nal_hdr.nuh_layer_id;
+  int nuh_temporal_id = nal_hdr.nuh_temporal_id;
 
   // read bitstream
 
@@ -178,13 +374,17 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     return DE265_OK;
   }
 
+  // Get parameter sets
   pic_parameter_set* pps = ctx->get_pps((int)slice_pic_parameter_set_id);
+  seq_parameter_set* sps = ctx->get_sps((int)pps->seq_parameter_set_id);
+  video_parameter_set *vps = ctx->get_vps(sps->video_parameter_set_id);
+  video_parameter_set_extension* vps_ext = &vps->vps_extension;
+
   if (!pps->pps_read) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
     return DE265_OK;
   }
 
-  seq_parameter_set* sps = ctx->get_sps((int)pps->seq_parameter_set_id);
   if (!sps->sps_read) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_SPS_REFERENCED, false);
     *continueDecoding = false;
@@ -207,6 +407,10 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
         return DE265_OK;
       }
 
+      if (ctx->previous_slice_header == NULL) {
+        return DE265_ERROR_NO_INITIAL_SLICE_HEADER;
+      }
+
       *this = *ctx->previous_slice_header;
 
       first_slice_segment_in_pic_flag = 0;
@@ -220,22 +424,31 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   }
 
   if (slice_segment_address < 0 ||
-      slice_segment_address > sps->PicSizeInCtbsY) {
+      slice_segment_address >= sps->PicSizeInCtbsY) {
     ctx->add_warning(DE265_WARNING_SLICE_SEGMENT_ADDRESS_INVALID, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
+  //printf("SLICE %d (%d)\n",slice_segment_address, sps->PicSizeInCtbsY);
 
 
   if (!dependent_slice_segment_flag) {
-    for (int i=0; i<pps->num_extra_slice_header_bits; i++) {
-      //slice_reserved_undetermined_flag[i]
-      skip_bits(br,1);
+    int i=0;
+    if( pps->num_extra_slice_header_bits > i ) {
+      i++;
+      skip_bits(br,1); // discardable_flag
+    }
+    if( pps->num_extra_slice_header_bits > i ) {
+      i++;
+      cross_layer_bla_flag = get_bits(br,1);
+    }
+
+    for (; i < pps->num_extra_slice_header_bits; i++) {
+      skip_bits(br,1); // slice_reserved_flag[ i ]
     }
 
     slice_type = get_uvlc(br);
-    if (slice_type > 2 ||
-	slice_type == UVLC_ERROR) {
+    if (slice_type > 2 ||	slice_type == UVLC_ERROR) {
       ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
       *continueDecoding = false;
       return DE265_OK;
@@ -258,27 +471,31 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
 
     int NumLtPics = 0;
 
-    if (ctx->get_nal_unit_type() != NAL_UNIT_IDR_W_RADL &&
-        ctx->get_nal_unit_type() != NAL_UNIT_IDR_N_LP) {
+    if( (nuh_layer_id > 0 && !vps_ext->poc_lsb_not_present_flag[vps_ext->LayerIdxInVps[nuh_layer_id]]) ||
+        (nal_unit_type != NAL_UNIT_IDR_W_RADL && nal_unit_type != NAL_UNIT_IDR_N_LP)) {
+
       slice_pic_order_cnt_lsb = get_bits(br, sps->log2_max_pic_order_cnt_lsb);
+    }
+
+    if( nal_unit_type != NAL_UNIT_IDR_W_RADL && nal_unit_type != NAL_UNIT_IDR_N_LP ) {
       short_term_ref_pic_set_sps_flag = get_bits(br,1);
 
       if (!short_term_ref_pic_set_sps_flag) {
         read_short_term_ref_pic_set(ctx, sps,
                                     br, &slice_ref_pic_set,
-                                    sps->num_short_term_ref_pic_sets,
+                                    sps->num_short_term_ref_pic_sets(),
                                     sps->ref_pic_sets,
                                     true);
 
-        CurrRpsIdx = sps->num_short_term_ref_pic_sets;
+        CurrRpsIdx = sps->num_short_term_ref_pic_sets();
         CurrRps    = slice_ref_pic_set;
       }
       else {
-        int nBits = ceil_log2(sps->num_short_term_ref_pic_sets);
+        int nBits = ceil_log2(sps->num_short_term_ref_pic_sets());
         if (nBits>0) short_term_ref_pic_set_idx = get_bits(br,nBits);
         else         short_term_ref_pic_set_idx = 0;
 
-        if (short_term_ref_pic_set_idx > sps->num_short_term_ref_pic_sets) {
+        if (short_term_ref_pic_set_idx >= sps->num_short_term_ref_pic_sets()) {
           ctx->add_warning(DE265_WARNING_SHORT_TERM_REF_PIC_SET_OUT_OF_RANGE, false);
           return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
         }
@@ -388,6 +605,29 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
       num_long_term_pics= 0;
     }
 
+    // Multilayer extension
+    if( nuh_layer_id > 0 && !vps_ext->default_ref_layers_active_flag &&
+        vps_ext->NumDirectRefLayers[ nuh_layer_id ] > 0 ) {
+      inter_layer_pred_enabled_flag = get_bits(br,1);
+      if( inter_layer_pred_enabled_flag && vps_ext->NumDirectRefLayers[nuh_layer_id] > 1) {
+        if (!vps_ext->max_one_active_ref_layer_flag) {
+          int nr_bits = ceil_log2( vps_ext->NumDirectRefLayers[nuh_layer_id] ) ;
+          num_inter_layer_ref_pics_minus1 = get_bits(br,nr_bits);
+        }
+      }
+    }
+    if (nuh_layer_id > 0) {
+      // The variables numRefLayerPics and refLayerPicIdc[ j ] are derived as follows: (JCTVC R1013_v6 F.7.4.7.2) (F 51)
+      int_1d refLayerPicIdc;
+      int i,j;
+      for( i=0, j=0; i < vps_ext->NumDirectRefLayers[ nuh_layer_id ]; i++ ) {
+        int refLayerIdx = vps_ext->LayerIdxInVps[ vps_ext->IdDirectRefLayer[ nuh_layer_id ][ i ] ];
+        if( vps_ext->sub_layers_vps_max_minus1[ refLayerIdx ] >= nuh_temporal_id && ( nuh_temporal_id == 0 ||
+            vps_ext->max_tid_il_ref_pics_plus1[ refLayerIdx ][ vps_ext->LayerIdxInVps[ nuh_layer_id ] ] > nuh_temporal_id ))
+          refLayerPicIdc[ j++ ] = i;
+      }
+      numRefLayerPics = j;
+    }
 
     // --- SAO ---
 
@@ -399,6 +639,9 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
       slice_sao_luma_flag   = 0;
       slice_sao_chroma_flag = 0;
     }
+
+    num_ref_idx_l0_active = 0;
+    num_ref_idx_l1_active = 0;
 
     if (slice_type == SLICE_TYPE_P  ||
         slice_type == SLICE_TYPE_B) {
@@ -425,7 +668,39 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
         num_ref_idx_l1_active = pps->num_ref_idx_l1_default_active;
       }
 
+      if (num_ref_idx_l0_active > 16) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+      if (num_ref_idx_l1_active > 16) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+
+      // In standard: NumPicTotalCurr
       NumPocTotalCurr = CurrRps.NumPocTotalCurr_shortterm_only + NumLtPics;
+
+      // The variable NumActiveRefLayerPics is derived as follows: (JCTVC R1013_v6 F.7.4.7.2) (F 52)
+      if( nuh_layer_id == 0 || numRefLayerPics == 0 ) {
+        NumActiveRefLayerPics = 0;
+      }
+      else if( vps_ext->default_ref_layers_active_flag ) {
+        NumActiveRefLayerPics = numRefLayerPics;
+      }
+      else if (!inter_layer_pred_enabled_flag) {
+        NumActiveRefLayerPics = 0;
+      }
+      else if (vps_ext->max_one_active_ref_layer_flag || vps_ext->NumDirectRefLayers[nuh_layer_id] == 1) {
+        NumActiveRefLayerPics = 1;
+      }
+      else {
+        NumActiveRefLayerPics = num_inter_layer_ref_pics_minus1 + 1;
+      }
+
+      if (NumActiveRefLayerPics != vps_ext->NumDirectRefLayers[nuh_layer_id]) {
+        for( i = 0; i < NumActiveRefLayerPics; i++ ) {
+          int nr_bits = ceil_log2(vps_ext->NumDirectRefLayers[nuh_layer_id]) ;
+          inter_layer_pred_layer_idc[ i ] = get_bits(br,nr_bits);
+        }
+      }
+      if (nuh_layer_id > 0) {
+        // Multilayer extension (F.7.4.7.2. JCTVC-R1013_v6) (F-52)
+        NumPocTotalCurr += NumActiveRefLayerPics;
+      }
 
       if (pps->lists_modification_present_flag && NumPocTotalCurr > 1) {
 
@@ -483,7 +758,16 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
         else {
           collocated_ref_idx = 0;
         }
+
+        // check whether collocated_ref_idx points to a valid index
+
+        if (( collocated_from_l0_flag && collocated_ref_idx >= num_ref_idx_l0_active) ||
+            (!collocated_from_l0_flag && collocated_ref_idx >= num_ref_idx_l1_active)) {
+          ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+          return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+        }
       }
+
 
       if ((pps->weighted_pred_flag   && slice_type == SLICE_TYPE_P) ||
           (pps->weighted_bipred_flag && slice_type == SLICE_TYPE_B)) {
@@ -578,6 +862,24 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
 
+    if (pps->entropy_coding_sync_enabled_flag) {
+      // check num_entry_points for valid range
+
+      int firstCTBRow = slice_segment_address / sps->PicWidthInCtbsY;
+      int lastCTBRow  = firstCTBRow + num_entry_point_offsets;
+      if (lastCTBRow >= sps->PicHeightInCtbsY) {
+        ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
+    }
+
+    if (pps->tiles_enabled_flag) {
+      if (num_entry_point_offsets > pps->num_tile_columns * pps->num_tile_rows) {
+        ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
+    }
+
     entry_point_offset.resize( num_entry_point_offsets );
 
     if (num_entry_point_offsets > 0) {
@@ -587,6 +889,10 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
       offset_len++;
+
+      if (offset_len > 32) {
+	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
 
       for (int i=0; i<num_entry_point_offsets; i++) {
         {
@@ -604,20 +910,488 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   }
 
   if (pps->slice_segment_header_extension_present_flag) {
-    slice_segment_header_extension_length = get_uvlc(br);
-    if (slice_segment_header_extension_length == UVLC_ERROR ||
-	slice_segment_header_extension_length > 1000) {  // TODO: safety check against too large values
-      ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
-      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    de265_error err = read_slice_segment_header_extension(br, ctx, pps, sps, nal_unit_type, nuh_layer_id);
+    if (err == DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER) {
+      // There was an error when parsing the slice segment header extension.
+      // Fall back to HEVC decoding.
+      ctx->get_multi_layer_decoder()->set_extensions_decoding_error();
+    }
+    else if (err != DE265_OK) {
+      // Slice header parsing error.
+      return err;
+    }
+  }
+
+  compute_derived_values(pps);
+
+  *continueDecoding = true;
+  return DE265_OK;
+}
+
+de265_error slice_segment_header::read_slice_segment_header_extension(bitreader* br,
+                                                                      decoder_context *ctx,
+                                                                      pic_parameter_set* pps,
+                                                                      seq_parameter_set* sps,
+                                                                      int nal_unit_type,
+                                                                      int nuh_layer_id)
+{
+  slice_segment_header_extension_length = get_uvlc(br);
+  if (slice_segment_header_extension_length == UVLC_ERROR ||
+	    slice_segment_header_extension_length > 256) {
+    //The value of slice_segment_header_extension_length shall be in the range of 0 to 256, inclusive.
+    ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+  int extension_length_bits = slice_segment_header_extension_length * 8;
+
+  if (ctx->get_multi_layer_decoder()->get_target_Layer_ID() == 0) {
+    // The target is only to decode the base layer. Act like an HEVC decoder.
+    // All following bits are slice_segment_header_extension_data_byte[i]
+    for (int i=0; i<slice_segment_header_extension_length; i++) {
+      get_bits(br,8);
+    }
+  }
+  else {
+    // Before every read operation check if the number of bits that was signaled
+    // has not been exceeded.
+
+    pps_multilayer_extension* pps_ext = &pps->pps_mult_ext;
+    if (pps_ext->poc_reset_info_present_flag) {
+      if (extension_length_bits < 2) {
+        return DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER;
+      }
+      poc_reset_idc = get_bits(br,2);
+      extension_length_bits -= 2;
+    }
+    if( poc_reset_idc  !=  0 ) {
+      if (extension_length_bits < 6) {
+        return DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER;
+      }
+      poc_reset_period_id = get_bits(br,6);
+      extension_length_bits -= 6;
+    }
+    if( poc_reset_idc == 3 ) {
+      int nr_bits = sps->log2_max_pic_order_cnt_lsb;
+      if (extension_length_bits < nr_bits + 1) {
+        return DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER;
+      }
+      full_poc_reset_flag = get_bits(br,1);
+      poc_lsb_val = get_bits(br,nr_bits);
+      extension_length_bits -= nr_bits + 1;
     }
 
-    for (int i=0; i<slice_segment_header_extension_length; i++) {
+    video_parameter_set *vps = ctx->get_vps(sps->video_parameter_set_id);
+    video_parameter_set_extension* vps_ext = &vps->vps_extension;
+
+    bool CraOrBlaPicFlag = ( nal_unit_type == NAL_UNIT_BLA_W_LP || nal_unit_type == NAL_UNIT_BLA_N_LP ||
+    nal_unit_type == NAL_UNIT_BLA_W_RADL || nal_unit_type == NAL_UNIT_CRA_NUT );
+
+    int PocMsbValRequiredFlag = CraOrBlaPicFlag && ( !vps_ext->vps_poc_lsb_aligned_flag  ||
+    ( vps_ext->vps_poc_lsb_aligned_flag  &&  vps_ext->NumDirectRefLayers[ nuh_layer_id ] == 0 ));
+
+    if( !PocMsbValRequiredFlag  &&  vps_ext->vps_poc_lsb_aligned_flag ) {
+      if (extension_length_bits < 1) {
+        return DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER;
+      }
+      poc_msb_cycle_val_present_flag = get_bits(br,1);
+      extension_length_bits--;
+    }
+    else {
+      poc_msb_cycle_val_present_flag = (PocMsbValRequiredFlag == 1);
+    }
+    if (poc_msb_cycle_val_present_flag) {
+      int nr_bits;
+      poc_msb_cycle_val = get_uvlc(br, &nr_bits);
+      if (extension_length_bits < nr_bits) {
+        return DE265_WARNING_MULTILAYER_ERROR_SWITCH_TO_BASE_LAYER;
+      }
+      extension_length_bits -= nr_bits;
+    }
+
+    // Read more data until slice_segment_header_extension_length bytes have been read
+    while (extension_length_bits % 8 != 0) {
+      // Read until we can read whole bytes
+      get_bits(br,1);
+      extension_length_bits--;
+    }
+    int extension_length_bytes = extension_length_bits / 8;
+    for (int i=0; i<extension_length_bytes; i++) {
       //slice_segment_header_extension_data_byte[i]
       get_bits(br,8);
     }
   }
 
+  return DE265_OK;
+}
 
+de265_error slice_segment_header::write(error_queue* errqueue, CABAC_encoder& out,
+                                        const seq_parameter_set* sps,
+                                        const pic_parameter_set* pps,
+                                        uint8_t nal_unit_type)
+{
+  out.write_bit(first_slice_segment_in_pic_flag);
+
+  if (isRapPic(nal_unit_type)) { // TODO: is this still correct ? Should we drop RapPicFlag ?
+    out.write_bit(no_output_of_prior_pics_flag);
+  }
+
+  if (slice_pic_parameter_set_id > DE265_MAX_PPS_SETS) {
+    errqueue->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
+    return DE265_OK;
+  }
+  out.write_uvlc(slice_pic_parameter_set_id);
+
+  if (!first_slice_segment_in_pic_flag) {
+    if (pps->dependent_slice_segments_enabled_flag) {
+      out.write_bit(dependent_slice_segment_flag);
+    }
+
+    out.write_bits(slice_segment_address, ceil_log2(sps->PicSizeInCtbsY));
+
+    if (dependent_slice_segment_flag) {
+      if (slice_segment_address == 0) {
+        errqueue->add_warning(DE265_WARNING_DEPENDENT_SLICE_WITH_ADDRESS_ZERO, false);
+        return DE265_OK;
+      }
+    }
+  }
+
+  if (slice_segment_address < 0 ||
+      slice_segment_address > sps->PicSizeInCtbsY) {
+    errqueue->add_warning(DE265_WARNING_SLICE_SEGMENT_ADDRESS_INVALID, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+
+
+  if (!dependent_slice_segment_flag) {
+    for (int i=0; i<pps->num_extra_slice_header_bits; i++) {
+      //slice_reserved_undetermined_flag[i]
+      out.skip_bits(1);
+    }
+
+    if (slice_type > 2) {
+      errqueue->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+      return DE265_OK;
+    }
+    out.write_uvlc(slice_type);
+
+    if (pps->output_flag_present_flag) {
+      out.write_bit(pic_output_flag);
+    }
+
+    if (sps->separate_colour_plane_flag == 1) {
+      out.write_bits(colour_plane_id,2);
+    }
+
+
+    int NumLtPics = 0;
+
+    if (nal_unit_type != NAL_UNIT_IDR_W_RADL &&
+        nal_unit_type != NAL_UNIT_IDR_N_LP) {
+      out.write_bits(slice_pic_order_cnt_lsb, sps->log2_max_pic_order_cnt_lsb);
+      out.write_bit(short_term_ref_pic_set_sps_flag);
+
+      if (!short_term_ref_pic_set_sps_flag) {
+        /* TODO
+        read_short_term_ref_pic_set(ctx, sps,
+                                    br, &slice_ref_pic_set,
+                                    sps->num_short_term_ref_pic_sets,
+                                    sps->ref_pic_sets,
+                                    true);
+        */
+        //CurrRpsIdx = sps->num_short_term_ref_pic_sets;
+        //CurrRps    = slice_ref_pic_set;
+      }
+      else {
+        int nBits = ceil_log2(sps->num_short_term_ref_pic_sets());
+        if (nBits>0) out.write_bits(short_term_ref_pic_set_idx,nBits);
+        else         { assert(short_term_ref_pic_set_idx==0); }
+
+        if (short_term_ref_pic_set_idx > sps->num_short_term_ref_pic_sets()) {
+          errqueue->add_warning(DE265_WARNING_SHORT_TERM_REF_PIC_SET_OUT_OF_RANGE, false);
+          return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+        }
+
+        //CurrRpsIdx = short_term_ref_pic_set_idx;
+        //CurrRps    = sps->ref_pic_sets[CurrRpsIdx];
+      }
+
+
+      // --- long-term MC ---
+
+      if (sps->long_term_ref_pics_present_flag) {
+        if (sps->num_long_term_ref_pics_sps > 0) {
+          out.write_uvlc(num_long_term_sps);
+        }
+        else {
+          assert(num_long_term_sps == 0);
+        }
+
+        out.write_uvlc(num_long_term_pics);
+
+
+        // check maximum number of reference frames
+
+        if (num_long_term_sps +
+            num_long_term_pics +
+            CurrRps.NumNegativePics +
+            CurrRps.NumPositivePics
+            > sps->sps_max_dec_pic_buffering[sps->sps_max_sub_layers-1])
+          {
+            errqueue->add_warning(DE265_WARNING_MAX_NUM_REF_PICS_EXCEEDED, false);
+            return DE265_OK;
+          }
+
+        for (int i=0; i<num_long_term_sps + num_long_term_pics; i++) {
+          if (i < num_long_term_sps) {
+            int nBits = ceil_log2(sps->num_long_term_ref_pics_sps);
+            out.write_bits(lt_idx_sps[i], nBits);
+
+            // check that the referenced lt-reference really exists
+
+            if (lt_idx_sps[i] >= sps->num_long_term_ref_pics_sps) {
+              errqueue->add_warning(DE265_NON_EXISTING_LT_REFERENCE_CANDIDATE_IN_SLICE_HEADER, false);
+              return DE265_OK;
+            }
+
+            //ctx->PocLsbLt[i] = sps->lt_ref_pic_poc_lsb_sps[ lt_idx_sps[i] ];
+            //ctx->UsedByCurrPicLt[i] = sps->used_by_curr_pic_lt_sps_flag[ lt_idx_sps[i] ];
+          }
+          else {
+            int nBits = sps->log2_max_pic_order_cnt_lsb;
+            out.write_bits(poc_lsb_lt[i], nBits);
+            out.write_bit(used_by_curr_pic_lt_flag[i]);
+
+            //ctx->PocLsbLt[i] = poc_lsb_lt[i];
+            //ctx->UsedByCurrPicLt[i] = used_by_curr_pic_lt_flag[i];
+          }
+
+          //if (ctx->UsedByCurrPicLt[i]) {
+          //NumLtPics++;
+          //}
+
+          out.write_bit(delta_poc_msb_present_flag[i]);
+          if (delta_poc_msb_present_flag[i]) {
+            out.write_uvlc(delta_poc_msb_cycle_lt[i]);
+          }
+          else {
+            assert(delta_poc_msb_cycle_lt[i] == 0);
+          }
+
+          /*
+          if (i==0 || i==num_long_term_sps) {
+            ctx->DeltaPocMsbCycleLt[i] = delta_poc_msb_cycle_lt[i];
+          }
+          else {
+            ctx->DeltaPocMsbCycleLt[i] = (delta_poc_msb_cycle_lt[i] +
+                                          ctx->DeltaPocMsbCycleLt[i-1]);
+          }
+          */
+        }
+      }
+      else {
+        assert(num_long_term_sps == 0);
+        assert(num_long_term_pics== 0);
+      }
+
+      if (sps->sps_temporal_mvp_enabled_flag) {
+        out.write_bit(slice_temporal_mvp_enabled_flag);
+      }
+      else {
+        assert(slice_temporal_mvp_enabled_flag == 0);
+      }
+    }
+    else {
+      assert(slice_pic_order_cnt_lsb == 0);
+      assert(num_long_term_sps == 0);
+      assert(num_long_term_pics== 0);
+    }
+
+
+    // --- SAO ---
+
+    if (sps->sample_adaptive_offset_enabled_flag) {
+      out.write_bit(slice_sao_luma_flag);
+      out.write_bit(slice_sao_chroma_flag);
+    }
+    else {
+      assert(slice_sao_luma_flag  == 0);
+      assert(slice_sao_chroma_flag== 0);
+    }
+
+    if (slice_type == SLICE_TYPE_P  ||
+        slice_type == SLICE_TYPE_B) {
+      out.write_bit(num_ref_idx_active_override_flag);
+
+      if (num_ref_idx_active_override_flag) {
+        out.write_uvlc(num_ref_idx_l0_active);
+        num_ref_idx_l0_active++;;
+
+        if (slice_type == SLICE_TYPE_B) {
+          out.write_uvlc(num_ref_idx_l1_active);
+          num_ref_idx_l1_active++;
+        }
+      }
+      else {
+        assert(num_ref_idx_l0_active == pps->num_ref_idx_l0_default_active);
+        assert(num_ref_idx_l1_active == pps->num_ref_idx_l1_default_active);
+      }
+
+      NumPocTotalCurr = CurrRps.NumPocTotalCurr_shortterm_only + NumLtPics;
+
+      if (pps->lists_modification_present_flag && NumPocTotalCurr > 1) {
+
+        int nBits = ceil_log2(NumPocTotalCurr);
+
+        out.write_bit(ref_pic_list_modification_flag_l0);
+        if (ref_pic_list_modification_flag_l0) {
+          for (int i=0;i<num_ref_idx_l0_active;i++) {
+            out.write_bits(list_entry_l0[i], nBits);
+          }
+        }
+
+        if (slice_type == SLICE_TYPE_B) {
+          out.write_bit(ref_pic_list_modification_flag_l1);
+          if (ref_pic_list_modification_flag_l1) {
+            for (int i=0;i<num_ref_idx_l1_active;i++) {
+              out.write_bits(list_entry_l1[i], nBits);
+            }
+          }
+        }
+        else {
+          assert(ref_pic_list_modification_flag_l1 == 0);
+        }
+      }
+      else {
+        assert(ref_pic_list_modification_flag_l0 == 0);
+        assert(ref_pic_list_modification_flag_l1 == 0);
+      }
+
+      if (slice_type == SLICE_TYPE_B) {
+        out.write_bit(mvd_l1_zero_flag);
+      }
+
+      if (pps->cabac_init_present_flag) {
+        out.write_bit(cabac_init_flag);
+      }
+      else {
+        assert(cabac_init_flag == 0);
+      }
+
+      if (slice_temporal_mvp_enabled_flag) {
+        if (slice_type == SLICE_TYPE_B)
+          out.write_bit(collocated_from_l0_flag);
+        else
+          { assert(collocated_from_l0_flag == 1); }
+
+        if (( collocated_from_l0_flag && num_ref_idx_l0_active > 1) ||
+            (!collocated_from_l0_flag && num_ref_idx_l1_active > 1)) {
+          out.write_uvlc(collocated_ref_idx);
+        }
+        else {
+          assert(collocated_ref_idx == 0);
+        }
+      }
+
+      if ((pps->weighted_pred_flag   && slice_type == SLICE_TYPE_P) ||
+          (pps->weighted_bipred_flag && slice_type == SLICE_TYPE_B)) {
+
+        assert(0);
+        /* TODO
+        if (!read_pred_weight_table(br,this,ctx))
+          {
+	    ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+	    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+          }
+        */
+      }
+
+      out.write_uvlc(five_minus_max_num_merge_cand);
+      //MaxNumMergeCand = 5-five_minus_max_num_merge_cand;
+    }
+
+    out.write_svlc(slice_qp_delta);
+
+    if (pps->pps_slice_chroma_qp_offsets_present_flag) {
+      out.write_svlc(slice_cb_qp_offset);
+      out.write_svlc(slice_cr_qp_offset);
+    }
+    else {
+      assert(slice_cb_qp_offset == 0);
+      assert(slice_cr_qp_offset == 0);
+    }
+
+    if (pps->deblocking_filter_override_enabled_flag) {
+      out.write_bit(deblocking_filter_override_flag);
+    }
+    else {
+      assert(deblocking_filter_override_flag == 0);
+    }
+
+    //slice_beta_offset = pps->beta_offset;
+    //slice_tc_offset   = pps->tc_offset;
+
+    if (deblocking_filter_override_flag) {
+      out.write_bit(slice_deblocking_filter_disabled_flag);
+      if (!slice_deblocking_filter_disabled_flag) {
+        out.write_svlc(slice_beta_offset/2);
+        out.write_svlc(slice_tc_offset  /2);
+      }
+    }
+    else {
+      assert(slice_deblocking_filter_disabled_flag == pps->pic_disable_deblocking_filter_flag);
+    }
+
+    if (pps->pps_loop_filter_across_slices_enabled_flag  &&
+        (slice_sao_luma_flag || slice_sao_chroma_flag ||
+         !slice_deblocking_filter_disabled_flag )) {
+      out.write_bit(slice_loop_filter_across_slices_enabled_flag);
+    }
+    else {
+      assert(slice_loop_filter_across_slices_enabled_flag ==
+             pps->pps_loop_filter_across_slices_enabled_flag);
+    }
+  }
+
+  if (pps->tiles_enabled_flag || pps->entropy_coding_sync_enabled_flag ) {
+    out.write_uvlc(num_entry_point_offsets);
+
+    if (num_entry_point_offsets > 0) {
+      out.write_uvlc(offset_len-1);
+
+      for (int i=0; i<num_entry_point_offsets; i++) {
+        {
+          int prev=0;
+          if (i>0) prev = entry_point_offset[i-1];
+          out.write_bits(entry_point_offset[i]-prev-1, offset_len);
+        }
+      }
+    }
+  }
+  else {
+    assert(num_entry_point_offsets == 0);
+  }
+
+  if (pps->slice_segment_header_extension_present_flag) {
+    out.write_uvlc(slice_segment_header_extension_length);
+    if (slice_segment_header_extension_length > 1000) {  // TODO: safety check against too large values
+      errqueue->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    for (int i=0; i<slice_segment_header_extension_length; i++) {
+      //slice_segment_header_extension_data_byte[i]
+      out.skip_bits(8);
+    }
+  }
+
+  return DE265_OK;
+}
+
+void slice_segment_header::compute_derived_values(const pic_parameter_set* pps)
+{
   // --- init variables ---
 
   SliceQPY = pps->pic_init_qp + slice_qp_delta;
@@ -629,10 +1403,8 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     case SLICE_TYPE_B: initType = 2 - cabac_init_flag; break;
     }
 
-  *continueDecoding = true;
-  return DE265_OK;
+  MaxNumMergeCand = 5-five_minus_max_num_merge_cand;
 }
-
 
 
 //-----------------------------------------------------------------------
@@ -668,9 +1440,9 @@ void slice_segment_header::dump_slice_segment_header(const decoder_context* ctx,
   LOG1("slice_pic_parameter_set_id             : %d\n", slice_pic_parameter_set_id);
 
   if (!first_slice_segment_in_pic_flag) {
-    if (pps->dependent_slice_segments_enabled_flag) {
+    //if (pps->dependent_slice_segments_enabled_flag) {
       LOG1("dependent_slice_segment_flag         : %d\n", dependent_slice_segment_flag);
-    }
+      //}
     LOG1("slice_segment_address                : %d\n", slice_segment_address);
   }
 
@@ -698,10 +1470,10 @@ void slice_segment_header::dump_slice_segment_header(const decoder_context* ctx,
       LOG1("short_term_ref_pic_set_sps_flag      : %d\n", short_term_ref_pic_set_sps_flag);
 
       if (!short_term_ref_pic_set_sps_flag) {
-        LOG1("ref_pic_set[ %2d ]: ",sps->num_short_term_ref_pic_sets);
+        LOG1("ref_pic_set[ %2d ]: ",sps->num_short_term_ref_pic_sets());
         dump_compact_short_term_ref_pic_set(&slice_ref_pic_set, 16, fh);
       }
-      else if (sps->num_short_term_ref_pic_sets > 1) {
+      else if (sps->num_short_term_ref_pic_sets() > 1) {
         LOG1("short_term_ref_pic_set_idx           : %d\n", short_term_ref_pic_set_idx);
         dump_compact_short_term_ref_pic_set(&sps->ref_pic_sets[short_term_ref_pic_set_idx], 16, fh);
       }
@@ -878,103 +1650,15 @@ void slice_segment_header::dump_slice_segment_header(const decoder_context* ctx,
 
 
 
-
-
-static void set_initValue(slice_segment_header* shdr,
-                          context_model* model, int initValue)
+void initialize_CABAC_models(thread_context* tctx)
 {
-  int slopeIdx = initValue >> 4;
-  int intersecIdx = initValue & 0xF;
-  int m = slopeIdx*5 - 45;
-  int n = (intersecIdx<<3) - 16;
-  int preCtxState = Clip3(1,126, ((m*Clip3(0,51, shdr->SliceQPY))>>4)+n);
+  const int QPY = tctx->shdr->SliceQPY;
+  const int initType = tctx->shdr->initType;
+  assert(initType >= 0 && initType <= 2);
 
-  logtrace(LogSlice,"QP=%d slopeIdx=%d intersecIdx=%d m=%d n=%d\n",shdr->SliceQPY,slopeIdx,intersecIdx,m,n);
-
-  model->MPSbit=(preCtxState<=63) ? 0 : 1;
-  model->state = model->MPSbit ? (preCtxState-64) : (63-preCtxState);
-
-  // model state will always be between [0;62]
-
-  assert(model->state <= 62);
+  tctx->ctx_model.init(initType, QPY);
 }
 
-
-static const int initValue_split_cu_flag[3][3] = {
-  { 139,141,157 },
-  { 107,139,126 },
-  { 107,139,126 },
-};
-static const int initValue_cu_skip_flag[2][3] = {
-  { 197,185,201 },
-  { 197,185,201 },
-};
-static const int initValue_part_mode[9] = { 184,154,139, 154,154,154, 139,154,154 };
-static const int initValue_prev_intra_luma_pred_flag[3] = { 184,154,183 };
-static const int initValue_intra_chroma_pred_mode[3] = { 63,152,152 };
-static const int initValue_cbf_luma[4] = { 111,141,153,111 };
-static const int initValue_cbf_chroma[12] = { 94,138,182,154,149,107,167,154,149,92,167,154 };
-static const int initValue_split_transform_flag[9] = { 153,138,138, 124,138,94, 224,167,122 }; // FIX712
-static const int initValue_last_significant_coefficient_prefix[54] = {
-    110,110,124,125,140,153,125,127,140,109,111,143,127,111, 79,108,123, 63,
-    125,110, 94,110, 95, 79,125,111,110, 78,110,111,111, 95, 94,108,123,108,
-    125,110,124,110, 95, 94,125,111,111, 79,125,126,111,111, 79,108,123, 93
-  };
-static const int initValue_coded_sub_block_flag[12] = { 91,171,134,141,121,140,61,154,121,140,61,154 };
-static const int initValue_significant_coeff_flag[3][42] = {
-    {
-      111,  111,  125,  110,  110,   94,  124,  108,  124,  107,  125,  141,  179,  153,  125,  107,
-      125,  141,  179,  153,  125,  107,  125,  141,  179,  153,  125,  140,  139,  182,  182,  152,
-      136,  152,  136,  153,  136,  139,  111,  136,  139,  111
-    },
-    {
-      155,  154,  139,  153,  139,  123,  123,   63,  153,  166,  183,  140,  136,  153,  154,  166,
-      183,  140,  136,  153,  154,  166,  183,  140,  136,  153,  154,  170,  153,  123,  123,  107,
-      121,  107,  121,  167,  151,  183,  140,  151,  183,  140,
-    },
-    {
-      170,  154,  139,  153,  139,  123,  123,   63,  124,  166,  183,  140,  136,  153,  154,  166,
-      183,  140,  136,  153,  154,  166,  183,  140,  136,  153,  154,  170,  153,  138,  138,  122,
-      121,  122,  121,  167,  151,  183,  140,  151,  183,  140
-    },
-  };
-static const int initValue_coeff_abs_level_greater1_flag[72] = {
-    140, 92,137,138,140,152,138,139,153, 74,149, 92,139,107,122,152,
-    140,179,166,182,140,227,122,197,154,196,196,167,154,152,167,182,
-    182,134,149,136,153,121,136,137,169,194,166,167,154,167,137,182,
-    154,196,167,167,154,152,167,182,182,134,149,136,153,121,136,122,
-    169,208,166,167,154,152,167,182
-  };
-static const int initValue_coeff_abs_level_greater2_flag[18] = {
-    138,153,136,167,152,152,107,167, 91,122,107,167,
-    107,167, 91,107,107,167
-  };
-static const int initValue_sao_merge_leftUp_flag[3] = { 153,153,153 };
-static const int initValue_sao_type_idx_lumaChroma_flag[3] = { 200,185,160 };
-static const int initValue_cu_qp_delta_abs[2] = { 154,154 };
-static const int initValue_transform_skip_flag[2] = { 139,139 };
-static const int initValue_merge_flag[2] = { 110,154 };
-static const int initValue_merge_idx[2] = { 122,137 };
-static const int initValue_pred_mode_flag[2] = { 149,134 };
-static const int initValue_abs_mvd_greater01_flag[4] = { 140,198,169,198 };
-static const int initValue_mvp_lx_flag[1] = { 168 };
-static const int initValue_rqt_root_cbf[1] = { 79 };
-static const int initValue_ref_idx_lX[2] = { 153,153 };
-static const int initValue_inter_pred_idc[5] = { 95,79,63,31,31 };
-static const int initValue_cu_transquant_bypass_flag[3] = { 154,154,154 };
-
-
-static void init_context(thread_context* tctx,
-                         enum context_model_indices idx,
-                         const int* initValues, int len)
-{
-  for (int i=0;i<len;i++)
-    {
-      set_initValue(tctx->shdr,
-                    &tctx->ctx_model[idx+i],
-                    initValues[i]);
-    }
-}
 
 
 static int decode_transform_skip_flag(thread_context* tctx, int cIdx)
@@ -985,6 +1669,9 @@ static int decode_transform_skip_flag(thread_context* tctx, int cIdx)
 
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_TRANSFORM_SKIP_FLAG+context]);
+
+  logtrace(LogSymbols,"$1 transform_skip_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -994,6 +1681,9 @@ static int decode_sao_merge_flag(thread_context* tctx)
   logtrace(LogSlice,"# sao_merge_left/up_flag\n");
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_SAO_MERGE_FLAG]);
+
+  logtrace(LogSymbols,"$1 sao_merge_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -1007,26 +1697,29 @@ static int decode_sao_type_idx(thread_context* tctx)
                               &tctx->ctx_model[CONTEXT_MODEL_SAO_TYPE_IDX]);
 
   if (bit0==0) {
+    logtrace(LogSymbols,"$1 sao_type_idx=%d\n",0);
     return 0;
   }
   else {
     int bit1 = decode_CABAC_bypass(&tctx->cabac_decoder);
     if (bit1==0) {
+      logtrace(LogSymbols,"$1 sao_type_idx=%d\n",1);
       return 1;
     }
     else {
+      logtrace(LogSymbols,"$1 sao_type_idx=%d\n",2);
       return 2;
     }
   }
 }
 
 
-static int decode_sao_offset_abs(thread_context* tctx)
+static int decode_sao_offset_abs(thread_context* tctx, int bitDepth)
 {
   logtrace(LogSlice,"# sao_offset_abs\n");
-  int bitDepth = 8;
   int cMax = (1<<(libde265_min(bitDepth,10)-5))-1;
   int value = decode_CABAC_TU_bypass(&tctx->cabac_decoder, cMax);
+  logtrace(LogSymbols,"$1 sao_offset_abs=%d\n",value);
   return value;
 }
 
@@ -1035,6 +1728,7 @@ static int decode_sao_class(thread_context* tctx)
 {
   logtrace(LogSlice,"# sao_class\n");
   int value = decode_CABAC_FL_bypass(&tctx->cabac_decoder, 2);
+  logtrace(LogSymbols,"$1 sao_class=%d\n",value);
   return value;
 }
 
@@ -1043,6 +1737,7 @@ static int decode_sao_offset_sign(thread_context* tctx)
 {
   logtrace(LogSlice,"# sao_offset_sign\n");
   int value = decode_CABAC_bypass(&tctx->cabac_decoder);
+  logtrace(LogSymbols,"$1 sao_offset_sign=%d\n",value);
   return value;
 }
 
@@ -1051,6 +1746,7 @@ static int decode_sao_band_position(thread_context* tctx)
 {
   logtrace(LogSlice,"# sao_band_position\n");
   int value = decode_CABAC_FL_bypass(&tctx->cabac_decoder,5);
+  logtrace(LogSymbols,"$1 sao_band_position=%d\n",value);
   return value;
 }
 
@@ -1060,6 +1756,7 @@ static int decode_transquant_bypass_flag(thread_context* tctx)
   logtrace(LogSlice,"# cu_transquant_bypass_enable_flag\n");
   int value = decode_CABAC_bit(&tctx->cabac_decoder,
                                &tctx->ctx_model[CONTEXT_MODEL_CU_TRANSQUANT_BYPASS_FLAG]);
+  logtrace(LogSymbols,"$1 transquant_bypass_flag=%d\n",value);
   return value;
 }
 
@@ -1070,16 +1767,10 @@ static int decode_transquant_bypass_flag(thread_context* tctx)
 static int decode_split_cu_flag(thread_context* tctx,
 				int x0, int y0, int ctDepth)
 {
-  //decoder_context* ctx = tctx->decctx;
-
-  if (x0==64 && y0==448) {
-    //raise(SIGINT);
-  }
-
   // check if neighbors are available
 
-  int availableL = check_CTB_available(tctx->img,tctx->shdr, x0,y0, x0-1,y0);
-  int availableA = check_CTB_available(tctx->img,tctx->shdr, x0,y0, x0,y0-1);
+  int availableL = check_CTB_available(tctx->img, x0,y0, x0-1,y0);
+  int availableA = check_CTB_available(tctx->img, x0,y0, x0,y0-1);
 
   int condL = 0;
   int condA = 0;
@@ -1098,6 +1789,8 @@ static int decode_split_cu_flag(thread_context* tctx,
 
   logtrace(LogSlice,"> split_cu_flag R=%x, ctx=%d, bit=%d\n", tctx->cabac_decoder.range,context,bit);
 
+  logtrace(LogSymbols,"$1 split_cu_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -1109,8 +1802,8 @@ static int decode_cu_skip_flag(thread_context* tctx,
 
   // check if neighbors are available
 
-  int availableL = check_CTB_available(tctx->img,tctx->shdr, x0,y0, x0-1,y0);
-  int availableA = check_CTB_available(tctx->img,tctx->shdr, x0,y0, x0,y0-1);
+  int availableL = check_CTB_available(tctx->img, x0,y0, x0-1,y0);
+  int availableA = check_CTB_available(tctx->img, x0,y0, x0,y0-1);
 
   int condL = 0;
   int condA = 0;
@@ -1129,6 +1822,8 @@ static int decode_cu_skip_flag(thread_context* tctx,
 
   logtrace(LogSlice,"> cu_skip_flag R=%x, ctx=%d, bit=%d\n", tctx->cabac_decoder.range,context,bit);
 
+  logtrace(LogSymbols,"$1 cu_skip_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -1145,42 +1840,63 @@ static enum PartMode decode_part_mode(thread_context* tctx,
 
     logtrace(LogSlice,"> %s\n",bit ? "2Nx2N" : "NxN");
 
+    logtrace(LogSymbols,"$1 part_mode=%d\n",bit ? PART_2Nx2N : PART_NxN);
+
     return bit ? PART_2Nx2N : PART_NxN;
   }
   else {
     int bit0 = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_PART_MODE+0]);
-    if (bit0) { return PART_2Nx2N; }
+    if (bit0) { logtrace(LogSymbols,"$1 part_mode=%d\n",PART_2Nx2N); return PART_2Nx2N; }
 
     // CHECK_ME: I optimize code and fix bug here, need more VERIFY!
     int bit1 = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_PART_MODE+1]);
     if (cLog2CbSize > img->sps.Log2MinCbSizeY) {
       if (!img->sps.amp_enabled_flag) {
+        logtrace(LogSymbols,"$1 part_mode=%d\n",bit1 ? PART_2NxN : PART_Nx2N);
         return bit1 ? PART_2NxN : PART_Nx2N;
       }
       else {
         int bit3 = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_PART_MODE+3]);
         if (bit3) {
+          logtrace(LogSymbols,"$1 part_mode=%d\n",bit1 ? PART_2NxN : PART_Nx2N);
           return bit1 ? PART_2NxN : PART_Nx2N;
         }
 
         int bit4 = decode_CABAC_bypass(&tctx->cabac_decoder);
-        if ( bit1 &&  bit4) return PART_2NxnD;
-        if ( bit1 && !bit4) return PART_2NxnU;
-        if (!bit1 && !bit4) return PART_nLx2N;
-        if (!bit1 &&  bit4) return PART_nRx2N;
+        if ( bit1 &&  bit4) {
+          logtrace(LogSymbols,"$1 part_mode=%d\n",PART_2NxnD);
+          return PART_2NxnD;
+        }
+        if ( bit1 && !bit4) {
+          logtrace(LogSymbols,"$1 part_mode=%d\n",PART_2NxnU);
+          return PART_2NxnU;
+        }
+        if (!bit1 && !bit4) {
+          logtrace(LogSymbols,"$1 part_mode=%d\n",PART_nLx2N);
+          return PART_nLx2N;
+        }
+        if (!bit1 &&  bit4) {
+          logtrace(LogSymbols,"$1 part_mode=%d\n",PART_nRx2N);
+          return PART_nRx2N;
+        }
       }
     }
     else {
       // TODO, we could save one if here when first decoding the next bin and then
       // checkcLog2CbSize==3 when it is '0'
 
-      if (bit1) return PART_2NxN;
+      if (bit1) {
+        logtrace(LogSymbols,"$1 part_mode=%d\n",PART_2NxN);
+        return PART_2NxN;
+      }
 
       if (cLog2CbSize==3) {
+        logtrace(LogSymbols,"$1 part_mode=%d\n",PART_Nx2N);
         return PART_Nx2N;
       }
       else {
         int bit2 = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_PART_MODE+2]);
+        logtrace(LogSymbols,"$1 part_mode=%d\n",PART_NxN-bit2);
         return (enum PartMode)((int)PART_NxN - bit2)/*bit2 ? PART_Nx2N : PART_NxN*/;
       }
     }
@@ -1191,27 +1907,31 @@ static enum PartMode decode_part_mode(thread_context* tctx,
 }
 
 
-static int decode_prev_intra_luma_pred_flag(thread_context* tctx)
+static inline int decode_prev_intra_luma_pred_flag(thread_context* tctx)
 {
   logtrace(LogSlice,"# prev_intra_luma_pred_flag\n");
   int bit = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_PREV_INTRA_LUMA_PRED_FLAG]);
+  logtrace(LogSymbols,"$1 prev_intra_luma_pred_flag=%d\n",bit);
   return bit;
 }
 
 
-static int decode_mpm_idx(thread_context* tctx)
+static inline int decode_mpm_idx(thread_context* tctx)
 {
   logtrace(LogSlice,"# mpm_idx (TU:2)\n");
   int mpm = decode_CABAC_TU_bypass(&tctx->cabac_decoder, 2);
   logtrace(LogSlice,"> mpm_idx = %d\n",mpm);
+  logtrace(LogSymbols,"$1 mpm_idx=%d\n",mpm);
   return mpm;
 }
 
 
-static int decode_rem_intra_luma_pred_mode(thread_context* tctx)
+static inline int decode_rem_intra_luma_pred_mode(thread_context* tctx)
 {
   logtrace(LogSlice,"# rem_intra_luma_pred_mode (5 bits)\n");
-  return decode_CABAC_FL_bypass(&tctx->cabac_decoder, 5);
+  int value = decode_CABAC_FL_bypass(&tctx->cabac_decoder, 5);
+  logtrace(LogSymbols,"$1 rem_intra_luma_pred_mode=%d\n",value);
+  return value;
 }
 
 
@@ -1230,6 +1950,7 @@ static int decode_intra_chroma_pred_mode(thread_context* tctx)
   }
 
   logtrace(LogSlice,"> intra_chroma_pred_mode = %d\n",mode);
+  logtrace(LogSymbols,"$1 intra_chroma_pred_mode=%d\n",mode);
 
   return mode;
 }
@@ -1246,6 +1967,7 @@ static int decode_split_transform_flag(thread_context* tctx,
   logtrace(LogSlice,"# context: %d\n",context);
 
   int bit = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_SPLIT_TRANSFORM_FLAG + context]);
+  logtrace(LogSymbols,"$1 split_transform_flag=%d\n",bit);
   return bit;
 }
 
@@ -1257,6 +1979,7 @@ static int decode_cbf_chroma(thread_context* tctx,
 
   int bit = decode_CABAC_bit(&tctx->cabac_decoder, &tctx->ctx_model[CONTEXT_MODEL_CBF_CHROMA + trafoDepth]);
 
+  logtrace(LogSymbols,"$1 cbf_chroma=%d\n",bit);
   return bit;
 }
 
@@ -1270,6 +1993,7 @@ static int decode_cbf_luma(thread_context* tctx,
 
   logtrace(LogSlice,"> cbf_luma = %d\n",bit);
 
+  logtrace(LogSymbols,"$1 cbf_luma=%d\n",bit);
   return bit;
 }
 
@@ -1292,6 +2016,7 @@ static inline int decode_coded_sub_block_flag(thread_context* tctx,
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_CODED_SUB_BLOCK_FLAG + ctxIdxInc]);
 
+  logtrace(LogSymbols,"$1 coded_sub_block_flag=%d\n",bit);
   return bit;
 }
 
@@ -1303,6 +2028,7 @@ static int decode_cu_qp_delta_abs(thread_context* tctx)
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_CU_QP_DELTA_ABS + 0]);
   if (bit==0) {
+    logtrace(LogSymbols,"$1 cu_qp_delta_abs=%d\n",0);
     return 0;
   }
 
@@ -1316,9 +2042,11 @@ static int decode_cu_qp_delta_abs(thread_context* tctx)
 
   if (prefix==5) {
     int value = decode_CABAC_EGk_bypass(&tctx->cabac_decoder, 0);
+    logtrace(LogSymbols,"$1 cu_qp_delta_abs=%d\n",value+5);
     return value + 5;
   }
   else {
+    logtrace(LogSymbols,"$1 cu_qp_delta_abs=%d\n",prefix);
     return prefix;
   }
 }
@@ -1760,6 +2488,9 @@ static inline int decode_significant_coeff_flag_lookup(thread_context* tctx,
 
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_SIGNIFICANT_COEFF_FLAG + ctxIdxInc]);
+
+  logtrace(LogSymbols,"$1 significant_coeff_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -1828,6 +2559,8 @@ static inline int decode_coeff_abs_level_greater1(thread_context* tctx,
   *lastInvocation_coeff_abs_level_greater1_flag = bit;
   *lastInvocation_ctxSet = ctxSet;
 
+  logtrace(LogSymbols,"$1 coeff_abs_level_greater1=%d\n",bit);
+
   return bit;
 }
 
@@ -1845,9 +2578,13 @@ static int decode_coeff_abs_level_greater2(thread_context* tctx,
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_COEFF_ABS_LEVEL_GREATER2_FLAG + ctxIdxInc]);
 
+  logtrace(LogSymbols,"$1 coeff_abs_level_greater2=%d\n",bit);
+
   return bit;
 }
 
+
+#define MAX_PREFIX 64
 
 static int decode_coeff_abs_level_remaining(thread_context* tctx,
                                             int cRiceParam)
@@ -1859,6 +2596,10 @@ static int decode_coeff_abs_level_remaining(thread_context* tctx,
   do {
     prefix++;
     codeword = decode_CABAC_bypass(&tctx->cabac_decoder);
+
+    if (prefix>MAX_PREFIX) {
+      return 0; // TODO: error
+    }
   }
   while (codeword);
 
@@ -1880,6 +2621,8 @@ static int decode_coeff_abs_level_remaining(thread_context* tctx,
     value = (((1<<(prefix-3))+3-1)<<cRiceParam)+codeword;
   }
 
+  logtrace(LogSymbols,"$1 coeff_abs_level_remaining=%d\n",value);
+
   return value;
 }
 
@@ -1891,6 +2634,8 @@ static int decode_merge_flag(thread_context* tctx)
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_MERGE_FLAG]);
 
+  logtrace(LogSymbols,"$1 merge_flag=%d\n",bit);
+
   return bit;
 }
 
@@ -1898,6 +2643,11 @@ static int decode_merge_flag(thread_context* tctx)
 static int decode_merge_idx(thread_context* tctx)
 {
   logtrace(LogSlice,"# merge_idx\n");
+
+  if (tctx->shdr->MaxNumMergeCand <= 1) {
+    logtrace(LogSymbols,"$1 merge_idx=%d\n",0);
+    return 0;
+  }
 
   // TU coding, first bin is CABAC, remaining are bypass.
   // cMax = MaxNumMergeCand-1
@@ -1922,6 +2672,7 @@ static int decode_merge_idx(thread_context* tctx)
   }
 
   logtrace(LogSlice,"> merge_idx = %d\n",idx);
+  logtrace(LogSymbols,"$1 merge_idx=%d\n",idx);
 
   return idx;
 }
@@ -1934,6 +2685,7 @@ static int decode_pred_mode_flag(thread_context* tctx)
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_PRED_MODE_FLAG]);
 
+  logtrace(LogSymbols,"$1 pred_mode=%d\n",bit);
   return bit;
 }
 
@@ -1944,6 +2696,7 @@ static int decode_mvp_lx_flag(thread_context* tctx)
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_MVP_LX_FLAG]);
 
+  logtrace(LogSymbols,"$1 mvp_lx_flag=%d\n",bit);
   return bit;
 }
 
@@ -1954,6 +2707,7 @@ static int decode_rqt_root_cbf(thread_context* tctx)
   int bit = decode_CABAC_bit(&tctx->cabac_decoder,
                              &tctx->ctx_model[CONTEXT_MODEL_RQT_ROOT_CBF]);
 
+  logtrace(LogSymbols,"$1 rqt_root_cbf=%d\n",bit);
   return bit;
 }
 
@@ -1988,6 +2742,7 @@ static int decode_ref_idx_lX(thread_context* tctx, int numRefIdxLXActive)
 
   logtrace(LogSlice,"> ref_idx = %d\n",idx);
 
+  logtrace(LogSymbols,"$1 ref_idx_lX=%d\n",idx);
   return idx;
 }
 
@@ -2022,47 +2777,11 @@ static enum InterPredIdc  decode_inter_pred_idc(thread_context* tctx,
   logtrace(LogSlice,"> inter_pred_idc = %d (%s)\n",value,
            value==0 ? "L0" : (value==1 ? "L1" : "BI"));
 
-  return (enum InterPredIdc) value;
+  logtrace(LogSymbols,"$1 decode_inter_pred_idx=%d\n",value+1);
+
+  return (enum InterPredIdc) (value+1);
 }
 
-
-
-void initialize_CABAC(thread_context* tctx)
-{
-  const int initType = tctx->shdr->initType;
-  assert(initType >= 0 && initType <= 2);
-
-  init_context(tctx, CONTEXT_MODEL_SPLIT_CU_FLAG, initValue_split_cu_flag[initType], 3);
-  if (initType > 0) {
-    init_context(tctx, CONTEXT_MODEL_CU_SKIP_FLAG,    initValue_cu_skip_flag[initType-1],  3);
-    init_context(tctx, CONTEXT_MODEL_PRED_MODE_FLAG, &initValue_pred_mode_flag[initType-1], 1);
-    init_context(tctx, CONTEXT_MODEL_MERGE_FLAG,             &initValue_merge_flag[initType-1],1);
-    init_context(tctx, CONTEXT_MODEL_MERGE_IDX,              &initValue_merge_idx[initType-1], 1);
-    init_context(tctx, CONTEXT_MODEL_INTER_PRED_IDC,         initValue_inter_pred_idc,         5);
-    init_context(tctx, CONTEXT_MODEL_REF_IDX_LX,             initValue_ref_idx_lX,             2);
-    init_context(tctx, CONTEXT_MODEL_ABS_MVD_GREATER01_FLAG, &initValue_abs_mvd_greater01_flag[initType == 1 ? 0 : 2], 2);
-    init_context(tctx, CONTEXT_MODEL_MVP_LX_FLAG,            initValue_mvp_lx_flag,            1);
-    init_context(tctx, CONTEXT_MODEL_RQT_ROOT_CBF,           initValue_rqt_root_cbf,           1);
-  }
-
-  init_context(tctx, CONTEXT_MODEL_PART_MODE,     &initValue_part_mode[(initType!=2 ? initType : 5)], 4);
-  init_context(tctx, CONTEXT_MODEL_PREV_INTRA_LUMA_PRED_FLAG, &initValue_prev_intra_luma_pred_flag[initType], 1);
-  init_context(tctx, CONTEXT_MODEL_INTRA_CHROMA_PRED_MODE,    &initValue_intra_chroma_pred_mode[initType],    1);
-  init_context(tctx, CONTEXT_MODEL_CBF_LUMA,                  &initValue_cbf_luma[initType == 0 ? 0 : 2],     2);
-  init_context(tctx, CONTEXT_MODEL_CBF_CHROMA,                &initValue_cbf_chroma[initType * 4],            4);
-  init_context(tctx, CONTEXT_MODEL_SPLIT_TRANSFORM_FLAG,      &initValue_split_transform_flag[initType * 3],  3);
-  init_context(tctx, CONTEXT_MODEL_LAST_SIGNIFICANT_COEFFICIENT_X_PREFIX, &initValue_last_significant_coefficient_prefix[initType * 18], 18);
-  init_context(tctx, CONTEXT_MODEL_LAST_SIGNIFICANT_COEFFICIENT_Y_PREFIX, &initValue_last_significant_coefficient_prefix[initType * 18], 18);
-  init_context(tctx, CONTEXT_MODEL_CODED_SUB_BLOCK_FLAG,                  &initValue_coded_sub_block_flag[initType * 4],        4);
-  init_context(tctx, CONTEXT_MODEL_SIGNIFICANT_COEFF_FLAG,              initValue_significant_coeff_flag[initType],    42);
-  init_context(tctx, CONTEXT_MODEL_COEFF_ABS_LEVEL_GREATER1_FLAG,       &initValue_coeff_abs_level_greater1_flag[initType * 24], 24);
-  init_context(tctx, CONTEXT_MODEL_COEFF_ABS_LEVEL_GREATER2_FLAG,       &initValue_coeff_abs_level_greater2_flag[initType *  6],  6);
-  init_context(tctx, CONTEXT_MODEL_SAO_MERGE_FLAG,                      &initValue_sao_merge_leftUp_flag[initType],    1);
-  init_context(tctx, CONTEXT_MODEL_SAO_TYPE_IDX,                        &initValue_sao_type_idx_lumaChroma_flag[initType], 1);
-  init_context(tctx, CONTEXT_MODEL_CU_QP_DELTA_ABS,        initValue_cu_qp_delta_abs,        2);
-  init_context(tctx, CONTEXT_MODEL_TRANSFORM_SKIP_FLAG,    initValue_transform_skip_flag,    2);
-  init_context(tctx, CONTEXT_MODEL_CU_TRANSQUANT_BYPASS_FLAG, &initValue_cu_transquant_bypass_flag[initType], 1);
-}
 
 
 /* Take CtbAddrInTS and compute
@@ -2169,7 +2888,7 @@ void read_sao(thread_context* tctx, int xCtb,int yCtb,
 
         if (SaoTypeIdx != 0) {
           for (int i=0;i<4;i++) {
-            saoinfo.saoOffsetVal[cIdx][i] = decode_sao_offset_abs(tctx);
+            saoinfo.saoOffsetVal[cIdx][i] = decode_sao_offset_abs(tctx, img->get_bit_depth(cIdx));
             logtrace(LogSlice,"saoOffsetVal[%d][%d] = %d\n",cIdx,i, saoinfo.saoOffsetVal[cIdx][i]);
           }
 
@@ -2260,7 +2979,7 @@ void read_coding_tree_unit(thread_context* tctx)
 }
 
 
-LIBDE265_INLINE static int luma_pos_to_ctbAddrRS(seq_parameter_set* sps, int x,int y)
+LIBDE265_INLINE static int luma_pos_to_ctbAddrRS(const seq_parameter_set* sps, int x,int y)
 {
   int ctbX = x >> sps->Log2CtbSizeY;
   int ctbY = y >> sps->Log2CtbSizeY;
@@ -2269,8 +2988,7 @@ LIBDE265_INLINE static int luma_pos_to_ctbAddrRS(seq_parameter_set* sps, int x,i
 }
 
 
-int check_CTB_available(de265_image* img,
-                        slice_segment_header* shdr,
+int check_CTB_available(const de265_image* img,
                         int xC,int yC, int xN,int yN)
 {
   // check whether neighbor is outside of frame
@@ -2374,46 +3092,23 @@ int residual_coding(thread_context* tctx,
 
   // --- determine scanIdx ---
 
-  int scanIdx;
-
   enum PredMode PredMode = img->get_pred_mode(x0,y0);
-
+  int scanIdx;
 
   if (PredMode == MODE_INTRA) {
     if (cIdx==0) {
-      if (log2TrafoSize==2 || log2TrafoSize==3) {
-        enum IntraPredMode predMode = img->get_IntraPredMode(x0,y0);
-        logtrace(LogSlice,"IntraPredMode[%d,%d] = %d\n",x0,y0,predMode);
-
-        if (predMode >= 6 && predMode <= 14) scanIdx=2;
-        else if (predMode >= 22 && predMode <= 30) scanIdx=1;
-        else scanIdx=0;
-      }
-      else { scanIdx=0; }
+      scanIdx = get_intra_scan_idx_luma(log2TrafoSize, img->get_IntraPredMode(x0,y0));
     }
     else {
-      if (log2TrafoSize==1 || log2TrafoSize==2) {
-        enum IntraPredMode predMode = tctx->IntraPredModeC;
-
-        if (predMode >= 6 && predMode <= 14) scanIdx=2;
-        else if (predMode >= 22 && predMode <= 30) scanIdx=1;
-        else scanIdx=0;
-      }
-      else { scanIdx=0; }
+      scanIdx = get_intra_scan_idx_chroma(log2TrafoSize, tctx->IntraPredModeC);
     }
-
-    logtrace(LogSlice,"pred: %d -> scan: %d\n",PredMode,scanIdx);
   }
   else {
     scanIdx=0;
   }
 
-
-  // HM 9 only ?
   if (scanIdx==2) {
-    int t = LastSignificantCoeffX;
-    LastSignificantCoeffX = LastSignificantCoeffY;
-    LastSignificantCoeffY = t;
+    std::swap(LastSignificantCoeffX, LastSignificantCoeffY);
   }
 
   logtrace(LogSlice,"LastSignificantCoeff: x=%d;y=%d\n",LastSignificantCoeffX,LastSignificantCoeffY);
@@ -2699,6 +3394,8 @@ int residual_coding(thread_context* tctx,
           coeff_abs_level_remaining = 0;
         }
 
+        logtrace(LogSlice, "coeff_abs_level_remaining=%d\n",coeff_abs_level_remaining);
+
 
         int16_t currCoeff = baseLevel + coeff_abs_level_remaining;
         if (coeff_sign[n]) {
@@ -2712,6 +3409,8 @@ int residual_coding(thread_context* tctx,
             currCoeff = -currCoeff;
           }
         }
+
+        logtrace(LogSlice, "quantized coefficient=%d\n",currCoeff);
 
 #ifdef DE265_LOG_TRACE
         //TransCoeffLevel[yC*CoeffStride + xC] = currCoeff;
@@ -2816,6 +3515,20 @@ int read_transform_unit(thread_context* tctx,
 }
 
 
+static void dump_cbsize(de265_image* img)
+{
+  int w = img->get_width(0);
+  int h = img->get_height(0);
+
+  for (int y=0;y<h;y+=8) {
+    for (int x=0;x<w;x+=8) {
+      printf("%d",img->get_log2CbSize(x,y));
+    }
+    printf("\n");
+  }
+}
+
+
 void read_transform_tree(thread_context* tctx,
                          int x0, int y0,        // position of TU in frame
                          int xBase, int yBase,  // position of parent TU in frame
@@ -2835,16 +3548,9 @@ void read_transform_tree(thread_context* tctx,
   de265_image* img = tctx->img;
   const seq_parameter_set* sps = &img->sps;
 
-  enum PredMode PredMode = img->get_pred_mode(x0,y0);
-  enum PartMode PartMode = img->get_PartMode(x0,y0);
-
   int split_transform_flag;
 
-  int interSplitFlag= (sps->max_transform_hierarchy_depth_inter==0 &&
-                       PredMode == MODE_INTER &&
-                       PartMode != PART_2Nx2N &&
-                       trafoDepth == 0);
-
+  enum PredMode PredMode = img->get_pred_mode(x0,y0);
 
   /*  If TrafoSize is larger than maximum size   -> split automatically
       If TrafoSize is at minimum size            -> do not split
@@ -2861,17 +3567,22 @@ void read_transform_tree(thread_context* tctx,
     }
   else
     {
+      enum PartMode PartMode = img->get_PartMode(x0,y0);
+
+      int interSplitFlag= (sps->max_transform_hierarchy_depth_inter==0 &&
+                           trafoDepth == 0 &&
+                           PredMode == MODE_INTER &&
+                           PartMode != PART_2Nx2N);
+
       split_transform_flag = (log2TrafoSize > sps->Log2MaxTrafoSize ||
                               (IntraSplitFlag==1 && trafoDepth==0) ||
                               interSplitFlag==1) ? 1:0;
     }
 
-
   if (split_transform_flag) {
     logtrace(LogSlice,"set_split_transform_flag(%d,%d, %d)\n",x0,y0,trafoDepth);
     img->set_split_transform_flag(x0,y0,trafoDepth);
   }
-
 
   int cbf_cb=-1;
   int cbf_cr=-1;
@@ -2892,6 +3603,13 @@ void read_transform_tree(thread_context* tctx,
   // cbf_cr/cbf_cb not present in bitstream -> induce values
 
   if (cbf_cb<0) {
+    assert(!(trafoDepth==0 && log2TrafoSize==2));
+
+    /* The standard specifies to check trafoDepth>0 AND log2TrafoSize==2.
+       However, I think that trafoDepth>0 is redundant as a CB is always
+       at least 8x8 and hence trafoDepth>0.
+     */
+
     if (trafoDepth>0 && log2TrafoSize==2) {
       cbf_cb = parent_cbf_cb;
     } else {
@@ -2923,10 +3641,17 @@ void read_transform_tree(thread_context* tctx,
                         MaxTrafoDepth,IntraSplitFlag, cuPredMode, cbf_cb,cbf_cr);
   }
   else {
-    int cbf_luma=1;
+    int cbf_luma;
 
     if (PredMode==MODE_INTRA || trafoDepth!=0 || cbf_cb || cbf_cr) {
       cbf_luma = decode_cbf_luma(tctx,trafoDepth);
+    }
+    else {
+      /* There cannot be INTER blocks with no residual data.
+         That case is already handled with rqt_root_cbf.
+       */
+
+      cbf_luma = 1;
     }
 
     logtrace(LogSlice,"call read_transform_unit %d/%d\n",x0,y0);
@@ -2942,9 +3667,20 @@ void read_transform_tree(thread_context* tctx,
       {
         enum IntraPredMode intraPredMode = img->get_IntraPredMode(x0,y0);
 
+        if (intraPredMode<0 || intraPredMode>=35) {
+          // TODO: ERROR
+          intraPredMode = INTRA_DC;
+        }
+
         decode_intra_prediction(img, x0,y0, intraPredMode, nT, 0);
 
         enum IntraPredMode chromaPredMode = tctx->IntraPredModeC;
+
+        if (chromaPredMode<0 || chromaPredMode>=35) {
+          // TODO: ERROR
+          chromaPredMode = INTRA_DC;
+        }
+
 
         if (nT>=8) {
           decode_intra_prediction(img, x0/2,y0/2, chromaPredMode, nT/2, 1);
@@ -3058,8 +3794,8 @@ void read_mvd_coding(thread_context* tctx,
   }
 
   //set_mvd(tctx->decctx, x0,y0, refList, value[0],value[1]);
-  tctx->mvd[refList][0] = value[0];
-  tctx->mvd[refList][1] = value[1];
+  tctx->motion.mvd[refList][0] = value[0];
+  tctx->motion.mvd[refList][1] = value[1];
 
   logtrace(LogSlice, "MVD[%d;%d|%d] = %d;%d\n",x0,y0,refList, value[0],value[1]);
 }
@@ -3069,23 +3805,20 @@ void read_prediction_unit_SKIP(thread_context* tctx,
                                int x0, int y0,
                                int nPbW, int nPbH)
 {
-  slice_segment_header* shdr = tctx->shdr;
+  int merge_idx = decode_merge_idx(tctx);
 
-  int merge_idx;
-  if (shdr->MaxNumMergeCand>1) {
-    merge_idx = decode_merge_idx(tctx);
-  }
-  else {
-    merge_idx = 0;
-  }
-
-  tctx->merge_idx = merge_idx;
-  tctx->merge_flag = true;
+  tctx->motion.merge_idx = merge_idx;
+  tctx->motion.merge_flag = true;
 
   logtrace(LogSlice,"prediction skip 2Nx2N, merge_idx: %d\n",merge_idx);
 }
 
 
+/* xC/yC : CB position
+   xB/yB : position offset of the PB
+   nPbW/nPbH : size of PB
+   nCS   : CB size
+ */
 void read_prediction_unit(thread_context* tctx,
                           int xC,int yC, int xB,int yB,
                           int nPbW, int nPbH,
@@ -3099,21 +3832,14 @@ void read_prediction_unit(thread_context* tctx,
   slice_segment_header* shdr = tctx->shdr;
 
   int merge_flag = decode_merge_flag(tctx);
-  tctx->merge_flag = merge_flag;
+  tctx->motion.merge_flag = merge_flag;
 
   if (merge_flag) {
-    int merge_idx;
-
-    if (shdr->MaxNumMergeCand>1) {
-      merge_idx = decode_merge_idx(tctx);
-    }
-    else {
-      merge_idx = 0;
-    }
+    int merge_idx = decode_merge_idx(tctx);
 
     logtrace(LogSlice,"prediction unit %d,%d, merge mode, index: %d\n",x0,y0,merge_idx);
 
-    tctx->merge_idx = merge_idx;
+    tctx->motion.merge_idx = merge_idx;
   }
   else { // no merge flag
     enum InterPredIdc inter_pred_idc;
@@ -3125,49 +3851,50 @@ void read_prediction_unit(thread_context* tctx,
       inter_pred_idc = PRED_L0;
     }
 
-    tctx->inter_pred_idc = inter_pred_idc; // set_inter_pred_idc(ctx,x0,y0, inter_pred_idc);
+    tctx->motion.inter_pred_idc = inter_pred_idc; // set_inter_pred_idc(ctx,x0,y0, inter_pred_idc);
 
     if (inter_pred_idc != PRED_L1) {
       int ref_idx_l0 = decode_ref_idx_lX(tctx, shdr->num_ref_idx_l0_active);
 
       // NOTE: case for only one reference frame is handles in decode_ref_idx_lX()
-      tctx->refIdx[0] = ref_idx_l0;
+      tctx->motion.refIdx[0] = ref_idx_l0;
 
       read_mvd_coding(tctx,x0,y0, 0);
 
       int mvp_l0_flag = decode_mvp_lx_flag(tctx); // l0
-      tctx->mvp_lX_flag[0] = mvp_l0_flag;
+      tctx->motion.mvp_l0_flag = mvp_l0_flag;
 
       logtrace(LogSlice,"prediction unit %d,%d, L0, refIdx=%d mvp_l0_flag:%d\n",
-               x0,y0, tctx->refIdx[0], mvp_l0_flag);
+               x0,y0, tctx->motion.refIdx[0], mvp_l0_flag);
     }
 
     if (inter_pred_idc != PRED_L0) {
       int ref_idx_l1 = decode_ref_idx_lX(tctx, shdr->num_ref_idx_l1_active);
 
       // NOTE: case for only one reference frame is handles in decode_ref_idx_lX()
-      tctx->refIdx[1] = ref_idx_l1;
+      tctx->motion.refIdx[1] = ref_idx_l1;
 
       if (shdr->mvd_l1_zero_flag &&
           inter_pred_idc == PRED_BI) {
-        tctx->mvd[1][0] = 0;
-        tctx->mvd[1][1] = 0;
+        tctx->motion.mvd[1][0] = 0;
+        tctx->motion.mvd[1][1] = 0;
       }
       else {
         read_mvd_coding(tctx,x0,y0, 1);
       }
 
       int mvp_l1_flag = decode_mvp_lx_flag(tctx); // l1
-      tctx->mvp_lX_flag[1] = mvp_l1_flag;
+      tctx->motion.mvp_l1_flag = mvp_l1_flag;
 
       logtrace(LogSlice,"prediction unit %d,%d, L1, refIdx=%d mvp_l1_flag:%d\n",
-               x0,y0, tctx->refIdx[1], mvp_l1_flag);
+               x0,y0, tctx->motion.refIdx[1], mvp_l1_flag);
     }
   }
 
 
 
-  decode_prediction_unit(tctx, xC,yC,xB,yB, nCS, nPbW,nPbH, partIdx);
+  decode_prediction_unit(tctx->decctx, tctx->shdr, tctx->img, tctx->motion,
+                         xC,yC,xB,yB, nCS, nPbW,nPbH, partIdx);
 }
 
 
@@ -3248,7 +3975,15 @@ void read_coding_unit(thread_context* tctx,
   logtrace(LogSlice,"- read_coding_unit %d;%d cbsize:%d\n",x0,y0,1<<log2CbSize);
 
 
-  img->set_log2CbSize(x0,y0, log2CbSize);
+  //QQprintf("- read_coding_unit %d;%d cbsize:%d\n",x0,y0,1<<log2CbSize);
+
+  img->set_log2CbSize(x0,y0, log2CbSize, true);
+
+  /* This is only required on corrupted input streams.
+     It may happen that there are several slices in the image that overlap.
+     In this case, flags would accumulate from both slices.
+  */
+  img->clear_split_transform_flags(x0,y0, log2CbSize);
 
   int nCbS = 1<<log2CbSize; // number of coding block samples
 
@@ -3291,7 +4026,8 @@ void read_coding_unit(thread_context* tctx,
     // DECODE
 
     int nCS_L = 1<<log2CbSize;
-    decode_prediction_unit(tctx,x0,y0, 0,0, nCS_L, nCS_L,nCS_L, 0);
+    decode_prediction_unit(tctx->decctx,tctx->shdr,tctx->img,tctx->motion,
+                           x0,y0, 0,0, nCS_L, nCS_L,nCS_L, 0);
   }
   else /* not skipped */ {
     if (shdr->slice_type != SLICE_TYPE_I) {
@@ -3357,6 +4093,9 @@ void read_coding_unit(thread_context* tctx,
         int mpm_idx[4], rem_intra_luma_pred_mode[4];
         idx=0;
 
+        int availableA0 = check_CTB_available(img, x0,y0, x0-1,y0);
+        int availableB0 = check_CTB_available(img, x0,y0, x0,y0-1);
+
         for (int j=0;j<nCbS;j+=pbOffset)
           for (int i=0;i<nCbS;i+=pbOffset)
             {
@@ -3375,77 +4114,17 @@ void read_coding_unit(thread_context* tctx,
 
               int IntraPredMode;
 
-              int availableA = check_CTB_available(img, shdr, x,y, x-1,y);
-              int availableB = check_CTB_available(img, shdr, x,y, x,y-1);
+              int availableA = availableA0 || (i>0); // left candidate always available for right blk
+              int availableB = availableB0 || (j>0); // top candidate always available for bottom blk
+
+
 
               int PUidx = (x>>sps->Log2MinPUSize) + (y>>sps->Log2MinPUSize)*sps->PicWidthInMinPUs;
 
-              // block on left side
-
-              enum IntraPredMode candIntraPredModeA, candIntraPredModeB;
-              if (availableA==false) {
-                candIntraPredModeA=INTRA_DC;
-              }
-              else if (img->get_pred_mode(x-1,y) != MODE_INTRA ||
-                       img->get_pcm_flag (x-1,y)) {
-                candIntraPredModeA=INTRA_DC;
-              }
-              else {
-                candIntraPredModeA = img->get_IntraPredMode_atIndex(PUidx-1);
-              }
-
-              // block above
-
-              if (availableB==false) {
-                candIntraPredModeB=INTRA_DC;
-              }
-              else if (img->get_pred_mode(x,y-1) != MODE_INTRA ||
-                       img->get_pcm_flag (x,y-1)) {
-                candIntraPredModeB=INTRA_DC;
-              }
-              else if (y-1 < ((y >> sps->Log2CtbSizeY) << sps->Log2CtbSizeY)) {
-                candIntraPredModeB=INTRA_DC;
-              }
-              else {
-                candIntraPredModeB = img->get_IntraPredMode_atIndex(PUidx-sps->PicWidthInMinPUs);
-              }
-
-              // build candidate list
-
               int candModeList[3];
 
-              logtrace(LogSlice,"availableA:%d candA:%d & availableB:%d candB:%d\n",
-                       availableA, candIntraPredModeA,
-                       availableB, candIntraPredModeB);
-
-              if (candIntraPredModeA == candIntraPredModeB) {
-                if (candIntraPredModeA < 2) {
-                  candModeList[0] = INTRA_PLANAR;
-                  candModeList[1] = INTRA_DC;
-                  candModeList[2] = INTRA_ANGULAR_26;
-                }
-                else {
-                  candModeList[0] = candIntraPredModeA;
-                  candModeList[1] = 2 + ((candIntraPredModeA-2 -1 +32) % 32);
-                  candModeList[2] = 2 + ((candIntraPredModeA-2 +1    ) % 32);
-                }
-              }
-              else {
-                candModeList[0] = candIntraPredModeA;
-                candModeList[1] = candIntraPredModeB;
-
-                if (candIntraPredModeA != INTRA_PLANAR &&
-                    candIntraPredModeB != INTRA_PLANAR) {
-                  candModeList[2] = INTRA_PLANAR;
-                }
-                else if (candIntraPredModeA != INTRA_DC &&
-                         candIntraPredModeB != INTRA_DC) {
-                  candModeList[2] = INTRA_DC;
-                }
-                else {
-                  candModeList[2] = INTRA_ANGULAR_26;
-                }
-              }
+              fillIntraPredModeCandidates(candModeList,x,y,PUidx,
+                                          availableA, availableB, img);
 
               for (int i=0;i<3;i++)
                 logtrace(LogSlice,"candModeList[%d] = %d\n", i, candModeList[i]);
@@ -3457,13 +4136,13 @@ void read_coding_unit(thread_context* tctx,
                 // sort candModeList
 
                 if (candModeList[0] > candModeList[1]) {
-                  int t = candModeList[0]; candModeList[0]=candModeList[1]; candModeList[1]=t;
+                  std::swap(candModeList[0],candModeList[1]);
                 }
                 if (candModeList[0] > candModeList[2]) {
-                  int t = candModeList[0]; candModeList[0]=candModeList[2]; candModeList[2]=t;
+                  std::swap(candModeList[0],candModeList[2]);
                 }
                 if (candModeList[1] > candModeList[2]) {
-                  int t = candModeList[1]; candModeList[1]=candModeList[2]; candModeList[2]=t;
+                  std::swap(candModeList[1],candModeList[2]);
                 }
 
                 // skip modes in the list
@@ -3560,7 +4239,7 @@ void read_coding_unit(thread_context* tctx,
     if (!pcm_flag) { // !pcm
       bool rqt_root_cbf;
 
-      uint8_t merge_flag = tctx->merge_flag; // !!get_merge_flag(ctx,x0,y0);
+      uint8_t merge_flag = tctx->motion.merge_flag; // !!get_merge_flag(ctx,x0,y0);
 
       if (cuPredMode != MODE_INTRA &&
           !(PartMode == PART_2Nx2N && merge_flag)) {
@@ -3568,6 +4247,11 @@ void read_coding_unit(thread_context* tctx,
         rqt_root_cbf = !!decode_rqt_root_cbf(tctx);
       }
       else {
+        /* rqt_root_cbf=1 is inferred for Inter blocks with 2Nx2N, merge mode.
+           These must be some residual data, because otherwise, the CB could
+           also be coded in SKIP mode.
+         */
+
         rqt_root_cbf = true;
       }
 
@@ -3683,6 +4367,8 @@ enum DecodeResult decode_substream(thread_context* tctx,
 
   const int startCtbY = tctx->CtbY;
 
+  //printf("start decoding substream at %d;%d\n",tctx->CtbX,tctx->CtbY);
+
   // in WPP mode: initialize CABAC model with stored model from row above
 
   if ((!first_independent_substream || tctx->CtbY != startCtbY) &&
@@ -3690,17 +4376,22 @@ enum DecodeResult decode_substream(thread_context* tctx,
       tctx->CtbY>=1 && tctx->CtbX==0)
     {
       if (sps->PicWidthInCtbsY>1) {
+        if ((tctx->CtbY-1) >= tctx->imgunit->ctx_models.size()) {
+          return Decode_Error;
+        }
+
+        //printf("CTX wait on %d/%d\n",1,tctx->CtbY-1);
+
         // we have to wait until the context model data is there
         tctx->img->wait_for_progress(tctx->task, 1,tctx->CtbY-1,CTB_PROGRESS_PREFILTER);
 
         // copy CABAC model from previous CTB row
-        memcpy(tctx->ctx_model,
-               &tctx->imgunit->ctx_models[(tctx->CtbY-1) * CONTEXT_MODEL_TABLE_LENGTH],
-               CONTEXT_MODEL_TABLE_LENGTH * sizeof(context_model));
+        tctx->ctx_model = tctx->imgunit->ctx_models[(tctx->CtbY-1)];
+        tctx->imgunit->ctx_models[(tctx->CtbY-1)].release(); // not used anymore
       }
       else {
         tctx->img->wait_for_progress(tctx->task, 0,tctx->CtbY-1,CTB_PROGRESS_PREFILTER);
-        initialize_CABAC(tctx);
+        initialize_CABAC_models(tctx);
       }
     }
 
@@ -3713,16 +4404,28 @@ enum DecodeResult decode_substream(thread_context* tctx,
         return Decode_Error;
     }
 
+    if (ctbx >= tctx->img->sps.PicWidthInCtbsY ||
+        ctby >= tctx->img->sps.PicHeightInCtbsY) {
+        return Decode_Error;
+    }
+
     if (block_wpp && ctby>0 && ctbx < ctbW-1) {
-      //printf("wait on %d/%d\n",ctbx+1,ctby-1);
+
+      // TODO: if we are in tiles mode and at the right border, do not wait for x+1,y-1
+
+      //printf("wait on %d/%d (%d)\n",ctbx+1,ctby-1, ctbx+1+(ctby-1)*sps->PicWidthInCtbsY);
 
       tctx->img->wait_for_progress(tctx->task, ctbx+1,ctby-1, CTB_PROGRESS_PREFILTER);
     }
 
-    //printf("%p: decode %d;%d\n", tctx, tctx->CtbY,tctx->CtbX);
+    //printf("%p: decode %d;%d\n", tctx, tctx->CtbX,tctx->CtbY);
 
 
     // read and decode CTB
+
+    if (tctx->ctx_model.empty() == false) {
+      return Decode_Error;
+    }
 
     read_coding_tree_unit(tctx);
 
@@ -3733,26 +4436,30 @@ enum DecodeResult decode_substream(thread_context* tctx,
         ctbx == 1 &&
         ctby < sps->PicHeightInCtbsY-1)
       {
-        context_model* ctx_store = &tctx->imgunit->ctx_models[ctby * CONTEXT_MODEL_TABLE_LENGTH];
+        // no storage for context table has been allocated
+        if (tctx->imgunit->ctx_models.size() <= ctby) {
+          return Decode_Error;
+        }
 
-        memcpy(ctx_store,
-               &tctx->ctx_model,
-               CONTEXT_MODEL_TABLE_LENGTH * sizeof(context_model));
+        tctx->imgunit->ctx_models[ctby] = tctx->ctx_model;
+        tctx->imgunit->ctx_models[ctby].decouple(); // store an independent copy
       }
 
 
     // end of slice segment ?
 
     int end_of_slice_segment_flag = decode_CABAC_term_bit(&tctx->cabac_decoder);
+    //printf("end-of-slice flag: %d\n", end_of_slice_segment_flag);
 
     if (end_of_slice_segment_flag) {
       // at the end of the slice segment, we store the CABAC model if we need it
       // because a dependent slice may follow
 
       if (pps->dependent_slice_segments_enabled_flag) {
-        memcpy(tctx->shdr->ctx_model_storage,
-               tctx->ctx_model,
-               CONTEXT_MODEL_TABLE_LENGTH * sizeof(context_model));
+        tctx->shdr->ctx_model_storage = tctx->ctx_model;
+        tctx->shdr->ctx_model_storage.decouple(); // store an independent copy
+
+        tctx->shdr->ctx_model_storage_defined = true;
       }
     }
 
@@ -3778,6 +4485,17 @@ enum DecodeResult decode_substream(thread_context* tctx,
 
 
     if (end_of_slice_segment_flag) {
+      /* corrupted inputs may send the end_of_slice_segment_flag even if not all
+         CTBs in a row have been coded. Hence, we mark all of them as finished.
+       */
+
+      /*
+      for (int x = ctbx+1 ; x<sps->PicWidthInCtbsY; x++) {
+        printf("mark skipped %d;%d\n",ctbx,ctby);
+        tctx->img->ctb_progress[ctbx+ctby*ctbW].set_progress(CTB_PROGRESS_PREFILTER);
+      }
+      */
+
       return Decode_EndOfSliceSegment;
     }
 
@@ -3807,7 +4525,7 @@ enum DecodeResult decode_substream(thread_context* tctx,
 
 
 
-void initialize_CABAC_at_slice_segment_start(thread_context* tctx)
+bool initialize_CABAC_at_slice_segment_start(thread_context* tctx)
 {
   de265_image* img = tctx->img;
   const pic_parameter_set* pps = &img->pps;
@@ -3817,45 +4535,93 @@ void initialize_CABAC_at_slice_segment_start(thread_context* tctx)
   if (shdr->dependent_slice_segment_flag) {
     int prevCtb = pps->CtbAddrTStoRS[ pps->CtbAddrRStoTS[shdr->slice_segment_address] -1 ];
 
-    slice_segment_header* prevCtbHdr = img->slices[ img->get_SliceHeaderIndex_atIndex(prevCtb) ];
+    int sliceIdx = img->get_SliceHeaderIndex_atIndex(prevCtb);
+    if (sliceIdx >= img->slices.size()) {
+      return false;
+    }
+    slice_segment_header* prevCtbHdr = img->slices[ sliceIdx ];
 
     if (pps->is_tile_start_CTB(shdr->slice_segment_address % sps->PicWidthInCtbsY,
                                shdr->slice_segment_address / sps->PicWidthInCtbsY
                                )) {
-      initialize_CABAC(tctx);
+      initialize_CABAC_models(tctx);
     }
     else {
-      tctx->img->wait_for_progress(tctx->task, prevCtb, CTB_PROGRESS_PREFILTER);
+      // wait for previous slice to finish decoding
 
-      memcpy(tctx->ctx_model,
-             prevCtbHdr->ctx_model_storage,
-             CONTEXT_MODEL_TABLE_LENGTH * sizeof(context_model));
+      //printf("wait for previous slice to finish decoding\n");
+
+
+      slice_unit* prevSliceSegment = tctx->imgunit->get_prev_slice_segment(tctx->sliceunit);
+      //assert(prevSliceSegment);
+      if (prevSliceSegment==NULL) {
+        return false;
+      }
+
+      prevSliceSegment->finished_threads.wait_for_progress(prevSliceSegment->nThreads);
+
+
+      /*
+      printf("wait for %d,%d (init)\n",
+             prevCtb / sps->PicWidthInCtbsY,
+             prevCtb % sps->PicWidthInCtbsY);
+      tctx->img->wait_for_progress(tctx->task, prevCtb, CTB_PROGRESS_PREFILTER);
+      */
+
+      if (!prevCtbHdr->ctx_model_storage_defined) {
+        return false;
+      }
+
+      tctx->ctx_model = prevCtbHdr->ctx_model_storage;
+      prevCtbHdr->ctx_model_storage.release();
     }
   }
   else {
-    initialize_CABAC(tctx);
+    initialize_CABAC_models(tctx);
   }
+
+  return true;
+}
+
+
+std::string thread_task_ctb_row::name() const {
+  char buf[100];
+  sprintf(buf,"ctb-row-%d",debug_startCtbRow);
+  return buf;
+}
+
+
+std::string thread_task_slice_segment::name() const {
+  char buf[100];
+  sprintf(buf,"slice-segment-%d;%d",debug_startCtbX,debug_startCtbY);
+  return buf;
 }
 
 
 void thread_task_slice_segment::work()
 {
-  struct thread_task_slice_segment* data = this;
+  thread_task_slice_segment* data = this;
   thread_context* tctx = data->tctx;
   de265_image* img = tctx->img;
 
   state = Running;
-  img->thread_run();
+  img->thread_run(this);
 
   setCtbAddrFromTS(tctx);
 
   //printf("%p: A start decoding at %d/%d\n", tctx, tctx->CtbX,tctx->CtbY);
 
   if (data->firstSliceSubstream) {
-    initialize_CABAC_at_slice_segment_start(tctx);
+    bool success = initialize_CABAC_at_slice_segment_start(tctx);
+    if (!success) {
+      state = Finished;
+      tctx->sliceunit->finished_threads.increase_progress(1);
+      img->thread_finishes(this);
+      return;
+    }
   }
   else {
-    initialize_CABAC(tctx);
+    initialize_CABAC_models(tctx);
   }
 
   init_CABAC_decoder_2(&tctx->cabac_decoder);
@@ -3863,7 +4629,8 @@ void thread_task_slice_segment::work()
   /*enum DecodeResult result =*/ decode_substream(tctx, false, data->firstSliceSubstream);
 
   state = Finished;
-  img->thread_finishes();
+  tctx->sliceunit->finished_threads.increase_progress(1);
+  img->thread_finishes(this);
 
   return; // DE265_OK;
 }
@@ -3871,7 +4638,7 @@ void thread_task_slice_segment::work()
 
 void thread_task_ctb_row::work()
 {
-  struct thread_task_ctb_row* data = this;
+  thread_task_ctb_row* data = this;
   thread_context* tctx = data->tctx;
   de265_image* img = tctx->img;
 
@@ -3879,17 +4646,28 @@ void thread_task_ctb_row::work()
   int ctbW = sps->PicWidthInCtbsY;
 
   state = Running;
-  img->thread_run();
+  img->thread_run(this);
 
   setCtbAddrFromTS(tctx);
 
   int ctby = tctx->CtbAddrInRS / ctbW;
   int myCtbRow = ctby;
 
-  // printf("start decoding at %d/%d\n", ctbx,ctby);
+  //printf("start CTB-row decoding at row %d\n", ctby);
 
   if (data->firstSliceSubstream) {
-    initialize_CABAC_at_slice_segment_start(tctx);
+    bool success = initialize_CABAC_at_slice_segment_start(tctx);
+    if (!success) {
+      // could not decode this row, mark whole row as finished
+      for (int x=0;x<ctbW;x++) {
+        img->ctb_progress[myCtbRow*ctbW + x].set_progress(CTB_PROGRESS_PREFILTER);
+      }
+
+      state = Finished;
+      tctx->sliceunit->finished_threads.increase_progress(1);
+      img->thread_finishes(this);
+      return;
+    }
     //initialize_CABAC(tctx);
   }
 
@@ -3905,17 +4683,20 @@ void thread_task_ctb_row::work()
 
   // TODO: what about slices that end properly in the middle of a CTB row?
 
-#if 1
   if (tctx->CtbY == myCtbRow) {
     int lastCtbX = sps->PicWidthInCtbsY; // assume no tiles when WPP is on
     for (int x = tctx->CtbX; x<lastCtbX ; x++) {
-      img->ctb_progress[myCtbRow*ctbW + x].set_progress(CTB_PROGRESS_PREFILTER);
+
+      if (x        < img->sps.PicWidthInCtbsY &&
+          myCtbRow < img->sps.PicHeightInCtbsY) {
+        img->ctb_progress[myCtbRow*ctbW + x].set_progress(CTB_PROGRESS_PREFILTER);
+      }
     }
   }
-#endif
 
   state = Finished;
-  img->thread_finishes();
+  tctx->sliceunit->finished_threads.increase_progress(1);
+  img->thread_finishes(this);
 }
 
 
@@ -3928,11 +4709,14 @@ de265_error read_slice_segment_data(thread_context* tctx)
   const seq_parameter_set* sps = &img->sps;
   slice_segment_header* shdr = tctx->shdr;
 
-  initialize_CABAC_at_slice_segment_start(tctx);
+  bool success = initialize_CABAC_at_slice_segment_start(tctx);
+  if (!success) {
+    return DE265_ERROR_UNSPECIFIED_DECODING_ERROR;
+  }
 
   init_CABAC_decoder_2(&tctx->cabac_decoder);
 
-  // printf("-----\n");
+  //printf("-----\n");
 
   bool first_slice_substream = !shdr->dependent_slice_segment_flag;
 
@@ -3967,7 +4751,7 @@ de265_error read_slice_segment_data(thread_context* tctx)
     first_slice_substream = false;
 
     if (pps->tiles_enabled_flag) {
-      initialize_CABAC(tctx);
+      initialize_CABAC_models(tctx);
     }
   } while (true);
 

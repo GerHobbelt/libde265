@@ -19,6 +19,7 @@
  */
 
 #include "decctx.h"
+#include "decctx-multilayer.h"
 #include "util.h"
 #include "sao.h"
 #include "sei.h"
@@ -114,6 +115,9 @@ thread_context::thread_context()
   img = NULL;
   shdr = NULL;
 
+  imgunit = NULL;
+  sliceunit = NULL;
+
 
   //memset(this,0,sizeof(thread_context));
 
@@ -138,14 +142,18 @@ slice_unit::slice_unit(decoder_context* decctx)
     shdr(NULL),
     flush_reorder_buffer(false),
     thread_contexts(NULL),
-    imgunit(NULL)
+    imgunit(NULL),
+    nThreads(0),
+    first_decoded_CTB_RS(-1),
+    last_decoded_CTB_RS(-1)
 {
   state = Unprocessed;
+  nThreadContexts = 0;
 }
 
 slice_unit::~slice_unit()
 {
-  ctx->nal_parser.free_NAL_unit(nal);
+  ctx->nal_parser->free_NAL_unit(nal);
 
   if (thread_contexts) {
     delete[] thread_contexts;
@@ -158,6 +166,7 @@ void slice_unit::allocate_thread_contexts(int n)
   assert(thread_contexts==NULL);
 
   thread_contexts = new thread_context[n];
+  nThreadContexts = n;
 }
 
 
@@ -178,6 +187,12 @@ image_unit::~image_unit()
   for (int i=0;i<tasks.size();i++) {
     delete tasks[i];
   }
+}
+
+
+base_context::base_context()
+{
+  set_acceleration_functions(de265_acceleration_AUTO);
 }
 
 
@@ -202,8 +217,6 @@ decoder_context::decoder_context()
   param_vps_headers_fd = -1;
   param_pps_headers_fd = -1;
   param_slice_headers_fd = -1;
-
-  set_acceleration_functions(de265_acceleration_AUTO);
 
   param_image_allocation_functions = de265_image::default_image_allocation;
   param_image_allocation_userdata  = NULL;
@@ -294,6 +307,15 @@ decoder_context::decoder_context()
   // --- decoded picture buffer ---
 
   current_image_poc_lsb = -1; // any invalid number
+
+  // Multilayer extensions
+  NumActiveRefLayerPics0 = 0;
+  NumActiveRefLayerPics1 = 0;
+
+  for (int i=0; i<MAX_REF_LAYERS; i++) {
+    ilRefPic[i] = NULL;
+  }
+  ilRefPic_upsampled = false;
 }
 
 
@@ -302,6 +324,14 @@ decoder_context::~decoder_context()
   while (!image_units.empty()) {
     delete image_units.back();
     image_units.pop_back();
+  }
+
+  // delete the created images in ilRefPic[]
+  for (int i=0; i<MAX_REF_LAYERS; i++) {
+    if (ilRefPic[i] != NULL) {
+      delete ilRefPic[i];
+      ilRefPic[i] = NULL;
+    }
   }
 }
 
@@ -324,7 +354,7 @@ void decoder_context::set_image_allocation_functions(de265_image_allocation* all
 
 de265_error decoder_context::start_thread_pool(int nThreads)
 {
-  ::start_thread_pool(&thread_pool, nThreads);
+  ::start_thread_pool(&thread_pool_, nThreads);
 
   num_worker_threads = nThreads;
 
@@ -336,7 +366,7 @@ void decoder_context::stop_thread_pool()
 {
   if (get_num_worker_threads()>0) {
     //flush_thread_pool(&ctx->thread_pool);
-    ::stop_thread_pool(&thread_pool);
+    ::stop_thread_pool(&thread_pool_);
   }
 }
 
@@ -345,7 +375,7 @@ void decoder_context::reset()
 {
   if (num_worker_threads>0) {
     //flush_thread_pool(&ctx->thread_pool);
-    ::stop_thread_pool(&thread_pool);
+    ::stop_thread_pool(&thread_pool_);
   }
 
   // --------------------------------------------------
@@ -395,7 +425,7 @@ void decoder_context::reset()
   // The error showed while scrubbing the ToS video in VLC.
   dpb.clear();
 
-  nal_parser.remove_pending_input_data();
+  nal_parser->remove_pending_input_data();
 
 
   while (!image_units.empty()) {
@@ -411,7 +441,7 @@ void decoder_context::reset()
   }
 }
 
-void decoder_context::set_acceleration_functions(enum de265_acceleration l)
+void base_context::set_acceleration_functions(enum de265_acceleration l)
 {
   // fill scalar functions first (so that function table is completely filled)
 
@@ -475,27 +505,33 @@ void decoder_context::init_thread_context(thread_context* tctx)
 }
 
 
-void decoder_context::add_task_decode_CTB_row(thread_context* tctx, bool firstSliceSubstream)
+void decoder_context::add_task_decode_CTB_row(thread_context* tctx,
+                                              bool firstSliceSubstream,
+                                              int ctbRow)
 {
   thread_task_ctb_row* task = new thread_task_ctb_row;
   task->firstSliceSubstream = firstSliceSubstream;
   task->tctx = tctx;
+  task->debug_startCtbRow = ctbRow;
   tctx->task = task;
 
-  add_task(&thread_pool, task);
+  add_task(&thread_pool_, task);
 
   tctx->imgunit->tasks.push_back(task);
 }
 
 
-void decoder_context::add_task_decode_slice_segment(thread_context* tctx, bool firstSliceSubstream)
+void decoder_context::add_task_decode_slice_segment(thread_context* tctx, bool firstSliceSubstream,
+                                                    int ctbx,int ctby)
 {
   thread_task_slice_segment* task = new thread_task_slice_segment;
   task->firstSliceSubstream = firstSliceSubstream;
   task->tctx = tctx;
+  task->debug_startCtbX = ctbx;
+  task->debug_startCtbY = ctby;
   tctx->task = task;
 
-  add_task(&thread_pool, task);
+  add_task(&thread_pool_, task);
 
   tctx->imgunit->tasks.push_back(task);
 }
@@ -505,14 +541,14 @@ de265_error decoder_context::read_vps_NAL(bitreader& reader)
 {
   logdebug(LogHeaders,"---> read VPS\n");
 
-  video_parameter_set vps = { 0 };
-  de265_error err = ::read_vps(this,&reader,&vps);
+  video_parameter_set vps;
+  de265_error err = vps.read(this,&reader);
   if (err != DE265_OK) {
     return err;
   }
 
   if (param_vps_headers_fd>=0) {
-    dump_vps(&vps, param_vps_headers_fd);
+    vps.dump(param_vps_headers_fd);
   }
 
   process_vps(&vps);
@@ -532,7 +568,7 @@ de265_error decoder_context::read_sps_NAL(bitreader& reader)
   }
 
   if (param_sps_headers_fd>=0) {
-    sps.dump_sps(param_sps_headers_fd);
+    sps.dump(param_sps_headers_fd);
   }
 
   process_sps(&sps);
@@ -549,7 +585,7 @@ de265_error decoder_context::read_pps_NAL(bitreader& reader)
   bool success = pps.read(&reader,this);
 
   if (param_pps_headers_fd>=0) {
-    pps.dump_pps(param_pps_headers_fd);
+    pps.dump(param_pps_headers_fd);
   }
 
   if (success) {
@@ -598,10 +634,10 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
   slice_segment_header* shdr = new slice_segment_header;
   bool continueDecoding;
-  de265_error err = shdr->read(&reader,this, &continueDecoding);
+  de265_error err = shdr->read(&reader,this, &continueDecoding, nal_hdr);
   if (!continueDecoding) {
     if (img) { img->integrity = INTEGRITY_NOT_DECODED; }
-    nal_parser.free_NAL_unit(nal);
+    nal_parser->free_NAL_unit(nal);
     delete shdr;
     return err;
   }
@@ -613,8 +649,8 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
   if (process_slice_segment_header(this, shdr, &err, nal->pts, &nal_hdr, nal->user_data) == false)
     {
-      img->integrity = INTEGRITY_NOT_DECODED;
-      nal_parser.free_NAL_unit(nal);
+      if (img!=NULL) img->integrity = INTEGRITY_NOT_DECODED;
+      nal_parser->free_NAL_unit(nal);
       delete shdr;
       return err;
     }
@@ -659,9 +695,10 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
     image_units.back()->slice_units.push_back(sliceunit);
   }
 
-  err = decode_some();
+  bool did_work;
+  err = decode_some(&did_work);
 
-  return err;
+  return DE265_OK;
 }
 
 
@@ -674,39 +711,40 @@ template <class T> void pop_front(std::vector<T>& vec)
 }
 
 
-de265_error decoder_context::decode_some()
+de265_error decoder_context::decode_some(bool* did_work, bool new_image)
 {
   de265_error err = DE265_OK;
 
-  if (0) {
-    static int cnt=0;
-    cnt++;
-    if (cnt<5) return DE265_OK;
-  }
+  *did_work = false;
 
   if (image_units.empty()) { return DE265_OK; }  // nothing to do
 
 
   // decode something if there is work to do
 
-  if ( ! image_units.empty() && ! image_units[0]->slice_units.empty() ) {
+  if ( ! image_units.empty() ) { // && ! image_units[0]->slice_units.empty() ) {
 
     image_unit* imgunit = image_units[0];
-    slice_unit* sliceunit = imgunit->slice_units[0];
+    slice_unit* sliceunit = imgunit->get_next_unprocessed_slice_segment();
 
-    pop_front(imgunit->slice_units);
+    if (sliceunit != NULL) {
 
-    if (sliceunit->flush_reorder_buffer) {
-      dpb.flush_reorder_buffer();
+      //pop_front(imgunit->slice_units);
+
+      if (sliceunit->flush_reorder_buffer) {
+        dpb.flush_reorder_buffer();
+      }
+
+      *did_work = true;
+
+      //err = decode_slice_unit_sequential(imgunit, sliceunit);
+      err = decode_slice_unit_parallel(imgunit, sliceunit);
+      if (err) {
+        return err;
+      }
+
+      //delete sliceunit;
     }
-
-    //err = decode_slice_unit_sequential(imgunit, sliceunit);
-    err = decode_slice_unit_parallel(imgunit, sliceunit);
-    if (err) {
-      return err;
-    }
-
-    delete sliceunit;
   }
 
 
@@ -714,12 +752,15 @@ de265_error decoder_context::decode_some()
   // if we decoded all slices of the current image and there will not
   // be added any more slices to the image, output the image
 
-  if ( ( image_units.size()>=2 && image_units[0]->slice_units.empty() ) ||
-       ( image_units.size()>=1 && image_units[0]->slice_units.empty() &&
-         nal_parser.number_of_NAL_units_pending()==0 &&
-         (nal_parser.is_end_of_stream() || nal_parser.is_end_of_frame()) )) {
+  if ( ( image_units.size()>=2 && image_units[0]->all_slice_segments_processed()) ||
+       ( image_units.size()>=1 && image_units[0]->all_slice_segments_processed() && new_image) ||
+       ( image_units.size()>=1 && image_units[0]->all_slice_segments_processed() &&
+         nal_parser->number_of_NAL_units_pending()==0 &&
+         (nal_parser->is_end_of_stream() || nal_parser->is_end_of_frame()) )) {
 
     image_unit* imgunit = image_units[0];
+
+    *did_work=true;
 
 
     // mark all CTBs as decoded even if they are not, because faulty input
@@ -788,25 +829,64 @@ de265_error decoder_context::decode_slice_unit_sequential(image_unit* imgunit,
   tctx.img  = imgunit->img;
   tctx.decctx = this;
   tctx.imgunit = imgunit;
+  tctx.sliceunit= sliceunit;
   tctx.CtbAddrInTS = imgunit->img->pps.CtbAddrRStoTS[tctx.shdr->slice_segment_address];
   tctx.task = NULL;
 
   init_thread_context(&tctx);
+
+  if (sliceunit->reader.bytes_remaining <= 0) {
+    return DE265_ERROR_PREMATURE_END_OF_SLICE;
+  }
 
   init_CABAC_decoder(&tctx.cabac_decoder,
                      sliceunit->reader.data,
                      sliceunit->reader.bytes_remaining);
 
   // alloc CABAC-model array if entropy_coding_sync is enabled
+
   if (current_pps->entropy_coding_sync_enabled_flag &&
       sliceunit->shdr->first_slice_segment_in_pic_flag) {
-    imgunit->ctx_models.resize( (img->sps.PicHeightInCtbsY-1) * CONTEXT_MODEL_TABLE_LENGTH );
+    imgunit->ctx_models.resize( (img->sps.PicHeightInCtbsY-1) ); //* CONTEXT_MODEL_TABLE_LENGTH );
   }
 
-  if ((err=read_slice_segment_data(&tctx)) != DE265_OK)
-    { return err; }
+  sliceunit->nThreads=1;
+
+  err=read_slice_segment_data(&tctx);
+
+  sliceunit->finished_threads.set_progress(1);
 
   return err;
+}
+
+
+void decoder_context::mark_whole_slice_as_processed(image_unit* imgunit,
+                                                    slice_unit* sliceunit,
+                                                    int progress)
+{
+  //printf("mark whole slice\n");
+
+
+  // mark all CTBs upto the next slice segment as processed
+
+  slice_unit* nextSegment = imgunit->get_next_slice_segment(sliceunit);
+  if (nextSegment) {
+    /*
+    printf("mark whole slice between %d and %d\n",
+           sliceunit->shdr->slice_segment_address,
+           nextSegment->shdr->slice_segment_address);
+    */
+
+    for (int ctb=sliceunit->shdr->slice_segment_address;
+         ctb < nextSegment->shdr->slice_segment_address;
+         ctb++)
+      {
+        if (ctb >= imgunit->img->number_of_ctbs())
+          break;
+
+        imgunit->img->ctb_progress[ctb].set_progress(progress);
+      }
+  }
 }
 
 
@@ -817,10 +897,17 @@ de265_error decoder_context::decode_slice_unit_parallel(image_unit* imgunit,
 
   remove_images_from_dpb(sliceunit->shdr->RemoveReferencesList);
 
-
+  /*
+  printf("-------- decode --------\n");
+  printf("IMAGE UNIT %p\n",imgunit);
+  sliceunit->shdr->dump_slice_segment_header(sliceunit->ctx, 1);
+  imgunit->dump_slices();
+  */
 
   de265_image* img = imgunit->img;
   const pic_parameter_set* pps = &img->pps;
+
+  sliceunit->state = slice_unit::InProgress;
 
   bool use_WPP = (img->decctx->num_worker_threads > 0 &&
                   pps->entropy_coding_sync_enabled_flag);
@@ -838,27 +925,66 @@ de265_error decoder_context::decode_slice_unit_parallel(image_unit* imgunit,
   }
 
 
+  // If this is the first slice segment, mark all CTBs before this as processed
+  // (the real first slice segment could be missing).
+
+  if (imgunit->is_first_slice_segment(sliceunit)) {
+    slice_segment_header* shdr = sliceunit->shdr;
+    int firstCTB = shdr->slice_segment_address;
+
+    for (int ctb=0;ctb<firstCTB;ctb++) {
+      //printf("mark pre progress %d\n",ctb);
+      img->ctb_progress[ctb].set_progress(CTB_PROGRESS_PREFILTER);
+    }
+  }
+
+
+  // if there is a previous slice that has been completely decoded,
+  // mark all CTBs until the start of this slice as completed
+
+  //printf("this slice: %p\n",sliceunit);
+  slice_unit* prevSlice = imgunit->get_prev_slice_segment(sliceunit);
+  //if (prevSlice) printf("prev slice state: %d\n",prevSlice->state);
+  if (prevSlice && prevSlice->state == slice_unit::Decoded) {
+    mark_whole_slice_as_processed(imgunit,prevSlice,CTB_PROGRESS_PREFILTER);
+  }
+
+
   // TODO: even though we cannot split this into several tasks, we should run it
   // as a background thread
   if (!use_WPP && !use_tiles) {
-    return decode_slice_unit_sequential(imgunit, sliceunit);
+    //printf("SEQ\n");
+    err = decode_slice_unit_sequential(imgunit, sliceunit);
+    sliceunit->state = slice_unit::Decoded;
+    mark_whole_slice_as_processed(imgunit,sliceunit,CTB_PROGRESS_PREFILTER);
+    return err;
   }
 
 
   if (use_WPP && use_tiles) {
     // TODO: this is not allowed ... output some warning or error
+
+    return DE265_WARNING_PPS_HEADER_INVALID;
   }
 
 
   if (use_WPP) {
-    return decode_slice_unit_WPP(imgunit, sliceunit);
+    //printf("WPP\n");
+    err = decode_slice_unit_WPP(imgunit, sliceunit);
+    sliceunit->state = slice_unit::Decoded;
+    mark_whole_slice_as_processed(imgunit,sliceunit,CTB_PROGRESS_PREFILTER);
+    return err;
   }
   else if (use_tiles) {
-    return decode_slice_unit_tiles(imgunit, sliceunit);
+    //printf("TILE\n");
+    err = decode_slice_unit_tiles(imgunit, sliceunit);
+    sliceunit->state = slice_unit::Decoded;
+    mark_whole_slice_as_processed(imgunit,sliceunit,CTB_PROGRESS_PREFILTER);
+    return err;
   }
 
   assert(false);
-  return DE265_OK;
+  return err;
 }
 
 
@@ -876,16 +1002,13 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
 
 
   assert(img->num_threads_active() == 0);
-  img->thread_start(nRows);
-
-  //printf("-------- decode --------\n");
 
 
   // reserve space to store entropy coding context models for each CTB row
 
   if (shdr->first_slice_segment_in_pic_flag) {
     // reserve space for nRows-1 because we don't need to save the CABAC model in the last CTB row
-    imgunit->ctx_models.resize( (img->sps.PicHeightInCtbsY-1) * CONTEXT_MODEL_TABLE_LENGTH );
+    imgunit->ctx_models.resize( (img->sps.PicHeightInCtbsY-1) ); //* CONTEXT_MODEL_TABLE_LENGTH );
   }
 
 
@@ -902,6 +1025,15 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
       ctbRow++;
       ctbAddrRS = ctbRow * ctbsWidth;
     }
+    else if (nRows>1 && (ctbAddrRS % ctbsWidth) != 0) {
+      // If slice segment consists of several WPP rows, each of them
+      // has to start at a row.
+
+      //printf("does not start at start\n");
+
+      err = DE265_WARNING_SLICEHEADER_INVALID;
+      break;
+    }
 
 
     // prepare thread context
@@ -912,6 +1044,7 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
     tctx->decctx  = img->decctx;
     tctx->img     = img;
     tctx->imgunit = imgunit;
+    tctx->sliceunit= sliceunit;
     tctx->CtbAddrInTS = pps->CtbAddrRStoTS[ctbAddrRS];
 
     init_thread_context(tctx);
@@ -927,13 +1060,23 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
     if (entryPt==nRows-1) dataEnd = sliceunit->reader.bytes_remaining;
     else                  dataEnd = shdr->entry_point_offset[entryPt];
 
+    if (dataStartIndex<0 || dataEnd>sliceunit->reader.bytes_remaining ||
+        dataEnd <= dataStartIndex) {
+      //printf("WPP premature end\n");
+      err = DE265_ERROR_PREMATURE_END_OF_SLICE;
+      break;
+    }
+
     init_CABAC_decoder(&tctx->cabac_decoder,
                        &sliceunit->reader.data[dataStartIndex],
                        dataEnd-dataStartIndex);
 
     // add task
 
-    add_task_decode_CTB_row(tctx, entryPt==0);
+    //printf("start task for ctb-row: %d\n",ctbRow);
+    img->thread_start(1);
+    sliceunit->nThreads++;
+    add_task_decode_CTB_row(tctx, entryPt==0, ctbRow);
   }
 
 #if 0
@@ -973,7 +1116,6 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
 
 
   assert(img->num_threads_active() == 0);
-  img->thread_start(nTiles);
 
   sliceunit->allocate_thread_contexts(nTiles);
 
@@ -986,6 +1128,12 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
     // entry points other than the first start at tile beginnings
     if (entryPt>0) {
       tileID++;
+
+      if (tileID >= pps->num_tile_columns * pps->num_tile_rows) {
+        err = DE265_WARNING_SLICEHEADER_INVALID;
+        break;
+      }
+
       int ctbX = pps->colBd[tileID % pps->num_tile_columns];
       int ctbY = pps->rowBd[tileID / pps->num_tile_columns];
       ctbAddrRS = ctbY * ctbsWidth + ctbX;
@@ -999,6 +1147,7 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
     tctx->decctx = img->decctx;
     tctx->img    = img;
     tctx->imgunit = imgunit;
+    tctx->sliceunit= sliceunit;
     tctx->CtbAddrInTS = pps->CtbAddrRStoTS[ctbAddrRS];
 
     init_thread_context(tctx);
@@ -1014,13 +1163,24 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
     if (entryPt==nTiles-1) dataEnd = sliceunit->reader.bytes_remaining;
     else                   dataEnd = shdr->entry_point_offset[entryPt];
 
+    if (dataStartIndex<0 || dataEnd>sliceunit->reader.bytes_remaining ||
+        dataEnd <= dataStartIndex) {
+      err = DE265_ERROR_PREMATURE_END_OF_SLICE;
+      break;
+    }
+
     init_CABAC_decoder(&tctx->cabac_decoder,
                        &sliceunit->reader.data[dataStartIndex],
                        dataEnd-dataStartIndex);
 
     // add task
 
-    add_task_decode_slice_segment(tctx, entryPt==0);
+    //printf("add tiles thread\n");
+    img->thread_start(1);
+    sliceunit->nThreads++;
+    add_task_decode_slice_segment(tctx, entryPt==0,
+                                  ctbAddrRS % ctbsWidth,
+                                  ctbAddrRS / ctbsWidth);
   }
 
   img->wait_for_completion();
@@ -1029,7 +1189,7 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
     delete imgunit->tasks[i];
   imgunit->tasks.clear();
 
-  return DE265_OK;
+  return err;
 }
 
 
@@ -1045,19 +1205,19 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
   bitreader_init(&reader, nal->data(), nal->size());
 
   nal_header nal_hdr;
-  nal_read_header(&reader, &nal_hdr);
+  nal_hdr.read(&reader);
   ctx->process_nal_hdr(&nal_hdr);
 
-  if (nal_hdr.nuh_layer_id > 0) {
-    // Discard all NAL units with nuh_layer_id > 0
-    // These will have to be handeled by an SHVC decoder.
-    nal_parser.free_NAL_unit(nal);
+  if (nal_hdr.nuh_layer_id != layer_ID) {
+    // The NAL unit was not meant for this layer decoder
+    nal_parser->free_NAL_unit(nal);
     return DE265_OK;
   }
 
-  loginfo(LogHighlevel,"NAL: 0x%x 0x%x -  unit type:%s temporal id:%d\n",
+  loginfo(LogHighlevel,"NAL: 0x%x 0x%x -  unit type:%s layer:%d temporal id:%d\n",
           nal->data()[0], nal->data()[1],
           get_NAL_name(nal_hdr.nal_unit_type),
+          nal_hdr.nuh_layer_id,
           nal_hdr.nuh_temporal_id);
 
   /*
@@ -1073,7 +1233,7 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
   //printf("hTid: %d\n", current_HighestTid);
 
   if (nal_hdr.nuh_temporal_id > current_HighestTid) {
-    nal_parser.free_NAL_unit(nal);
+    nal_parser->free_NAL_unit(nal);
     return DE265_OK;
   }
 
@@ -1084,32 +1244,32 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
   else switch (nal_hdr.nal_unit_type) {
     case NAL_UNIT_VPS_NUT:
       err = read_vps_NAL(reader);
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
 
     case NAL_UNIT_SPS_NUT:
       err = read_sps_NAL(reader);
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
 
     case NAL_UNIT_PPS_NUT:
       err = read_pps_NAL(reader);
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
 
     case NAL_UNIT_PREFIX_SEI_NUT:
     case NAL_UNIT_SUFFIX_SEI_NUT:
       err = read_sei_NAL(reader, nal_hdr.nal_unit_type==NAL_UNIT_SUFFIX_SEI_NUT);
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
 
     case NAL_UNIT_EOS_NUT:
       ctx->FirstAfterEndOfSequenceNAL = true;
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
 
     default:
-      nal_parser.free_NAL_unit(nal);
+      nal_parser->free_NAL_unit(nal);
       break;
     }
 
@@ -1123,8 +1283,8 @@ de265_error decoder_context::decode(int* more)
 
   // if the stream has ended, and no more NALs are to be decoded, flush all pictures
 
-  if (ctx->nal_parser.get_NAL_queue_length() == 0 &&
-      (ctx->nal_parser.is_end_of_stream() || ctx->nal_parser.is_end_of_frame()) &&
+  if (ctx->nal_parser->get_NAL_queue_length() == 0 &&
+      (ctx->nal_parser->is_end_of_stream() || ctx->nal_parser->is_end_of_frame()) &&
       ctx->image_units.empty()) {
 
     // flush all pending pictures into output queue
@@ -1141,9 +1301,9 @@ de265_error decoder_context::decode(int* more)
   // if NAL-queue is empty, we need more data
   // -> input stalled
 
-  if (ctx->nal_parser.is_end_of_stream() == false &&
-      ctx->nal_parser.is_end_of_frame() == false &&
-      ctx->nal_parser.get_NAL_queue_length() == 0) {
+  if (ctx->nal_parser->is_end_of_stream() == false &&
+      ctx->nal_parser->is_end_of_frame() == false &&
+      ctx->nal_parser->get_NAL_queue_length() == 0) {
     if (more) { *more=1; }
 
     return DE265_ERROR_WAITING_FOR_INPUT_DATA;
@@ -1162,26 +1322,28 @@ de265_error decoder_context::decode(int* more)
   // decode one NAL from the queue
 
   de265_error err = DE265_OK;
+  bool did_work = false;
 
-  if (ctx->nal_parser.get_NAL_queue_length()) { // number_of_NAL_units_pending()) {
-    NAL_unit* nal = ctx->nal_parser.pop_from_NAL_queue();
+  if (ctx->nal_parser->get_NAL_queue_length()) { // number_of_NAL_units_pending()) {
+    NAL_unit* nal = ctx->nal_parser->pop_from_NAL_queue();
     assert(nal);
     err = ctx->decode_NAL(nal);
     // ctx->nal_parser.free_NAL_unit(nal); TODO: do not free NAL with new loop
+    did_work=true;
   }
-  else if (ctx->nal_parser.is_end_of_frame() == true &&
+  else if (ctx->nal_parser->is_end_of_frame() == true &&
       ctx->image_units.empty()) {
     if (more) { *more=1; }
 
     return DE265_ERROR_WAITING_FOR_INPUT_DATA;
   }
   else {
-    err = decode_some();
+    err = decode_some(&did_work);
   }
 
   if (more) {
     // decoding error is assumed to be unrecoverable
-    *more = (err==DE265_OK);
+    *more = (err==DE265_OK && did_work);
   }
 
   return err;
@@ -1192,17 +1354,15 @@ void decoder_context::process_nal_hdr(nal_header* nal)
 {
   nal_unit_type = nal->nal_unit_type;
 
-  IdrPicFlag = (nal->nal_unit_type == NAL_UNIT_IDR_W_RADL ||
-                nal->nal_unit_type == NAL_UNIT_IDR_N_LP);
-
-  RapPicFlag = (nal->nal_unit_type >= 16 &&
-                nal->nal_unit_type <= 23);
+  IdrPicFlag = isIdrPic(nal->nal_unit_type);
+  RapPicFlag = isRapPic(nal->nal_unit_type);
 }
 
 
 void decoder_context::process_vps(video_parameter_set* vps)
 {
   this->vps[ vps->video_parameter_set_id ] = *vps;
+  last_vps = &this->vps[ vps->video_parameter_set_id ];
 }
 
 
@@ -1267,9 +1427,9 @@ void decoder_context::process_picture_order_count(decoder_context* ctx, slice_se
            ctx->img->PicOrderCntVal);
 
   if (ctx->img->nal_hdr.nuh_temporal_id==0 &&
-      (isReferenceNALU(ctx->nal_unit_type) &&
-       (!isRASL(ctx->nal_unit_type) && !isRADL(ctx->nal_unit_type))) &&
-      1 /* sub-layer non-reference picture */) // TODO
+      !isSublayerNonReference(ctx->nal_unit_type) &&
+      !isRASL(ctx->nal_unit_type) &&
+      !isRADL(ctx->nal_unit_type))
     {
       loginfo(LogHeaders,"set prevPicOrderCntLsb/Msb\n");
 
@@ -1292,6 +1452,7 @@ int decoder_context::generate_unavailable_reference_picture(decoder_context* ctx
   assert(idx>=0);
   //printf("-> fill with unavailable POC %d\n",POC);
 
+  // TODO: What if this is an inter layer picture?
   de265_image* img = ctx->dpb.get_image(idx);
 
   img->fill_image(1<<(sps->BitDepth_Y-1),
@@ -1309,6 +1470,324 @@ int decoder_context::generate_unavailable_reference_picture(decoder_context* ctx
   return idx;
 }
 
+/* H.8.1.3   invoked once per picture
+
+   This function will mark inter layer pictures in the DPB as 'unused' or 'used for long-term reference'.
+   Outputs of this process are updated lists of inter-layer reference pictures RefPicSetInterLayer0 and RefPicSetInterLayer1 and the variables NumActiveRefLayerPics0 and NumActiveRefLayerPics1.
+ */
+void decoder_context::process_inter_layer_reference_picture_set(decoder_context* ctx, slice_segment_header* hdr)
+{
+  // The variable currLayerId is set equal to nuh_layer_id of the current picture
+  int currLayerId = ctx->img->get_ID();
+  int nuh_layer_id = currLayerId;
+
+  // The variables NumRefLayerPicsProcessing, NumRefLayerPicsSampleProcessing, and NumRefLayerPicsMotionProcessing are set equal to 0.
+  int NumRefLayerPicsProcessing = 0;
+  int NumRefLayerPicsSampleProcessing = 0;
+  int NumRefLayerPicsMotionProcessing = 0;
+
+  // The lists RefPicSetInterLayer0 and RefPicSetInterLayer1 are first emptied, ...
+  for (int i=0; i<MAX_REF_LAYERS; i++) {
+    RefPicSetInterLayer0[i] = 0;
+    RefPicSetInterLayer1[i] = 0;
+  }
+  // ... NumActiveRefLayerPics0 and NumActiveRefLayerPics1 are set equal to 0 ...
+  NumActiveRefLayerPics0 = 0;
+  NumActiveRefLayerPics1 = 0;
+
+  // Get VPS
+  video_parameter_set* vps = ctx->current_vps;
+  video_parameter_set_extension* vps_ext = &vps->vps_extension;
+  int ViewId[8];
+  for (int i=0; i<8; i++) {
+    ViewId[i] = vps_ext->view_id_val[i];
+  }
+
+  // Derive RefPicLayerId (JCTVC-R1013_v6 F.7.4.7.1 F-53)
+  int_1d RefPicLayerId;
+  for( int i=0; i < hdr->NumActiveRefLayerPics; i++ ) {
+	  RefPicLayerId[i] = vps_ext->IdDirectRefLayer[nuh_layer_id][hdr->inter_layer_pred_layer_idc[i]];
+  }
+
+  // ... and the following applies:
+  for( int i=0; i<hdr->NumActiveRefLayerPics; i++ ) {
+    bool refPicSet0Flag =
+      ((ViewId[currLayerId] <= ViewId[0] && ViewId[currLayerId] <= ViewId[RefPicLayerId[i]]) ||
+      (ViewId[currLayerId] >= ViewId[0] && ViewId[currLayerId] >= ViewId[RefPicLayerId[i]]));
+
+    // Look for the lower layer reference picture in the lower layer dpb
+    int refLayerID = RefPicLayerId[i];
+    decoder_context *ctx_lower = ctx->get_multi_layer_decoder()->get_layer_dec(refLayerID);
+
+    // Get current POC and ID (? wat is this ID?)
+    int currentPOC = ctx->img->PicOrderCntVal;
+    const int currentID = ctx->img->get_ID();
+
+    int DPBIndex = ctx_lower->dpb.DPB_index_of_picture_with_POC(currentPOC, currentID);
+    if (DPBIndex != -1) {
+      // an inter-layer reference picture ilRefPic is derived by invoking the process specified in clause H.8.1.4 with picX and RefPicLayerId[ i ] given as inputs
+      de265_image* rlPic = ctx_lower->dpb.get_image(DPBIndex);
+      derive_inter_layer_reference_picture(ctx, rlPic, refLayerID, i);
+
+      if (refPicSet0Flag) {
+        RefPicSetInterLayer0[ NumActiveRefLayerPics0 ] = i;
+        NumActiveRefLayerPics0++;
+      }
+      else {
+        RefPicSetInterLayer1[ NumActiveRefLayerPics1 ] = i;
+        NumActiveRefLayerPics1++;
+      }
+      // Mark the inter layer picture as used for long term reference
+      ilRefPic[i]->PicState = UsedForLongTermReference;
+    }
+    else {
+      if( refPicSet0Flag ) {
+        RefPicSetInterLayer0[ NumActiveRefLayerPics0++ ] = -1;
+      }
+      else {
+        RefPicSetInterLayer1[ NumActiveRefLayerPics1++ ] = -1;
+      }
+    }
+  }
+}
+
+/* H.8.1.4 Derivation process for inter-layer reference pictures
+
+   In case of SNR scalalbility: After calling this function ilRefPic[ilRefPicIdx] will contain a pointer to
+   the reference layer image.
+   In case of spatial scalalbility: After calling this function ilRefPic[ilRefPicIdx] will contain a new image
+   containing the upsampeled reference layer image. (Remember to delete these images after decoding)
+ */
+void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx, de265_image* rlPic, int rLId, int ilRefPicIdx)
+{
+  // Get the pps, pps_ext and sps
+  pic_parameter_set* pps = ctx->current_pps;
+  pps_multilayer_extension* pps_ext = &pps->pps_mult_ext;
+  seq_parameter_set* sps = ctx->current_sps;
+
+  // ... are set to ... of the current layer
+  int PicWidthInSamplesCurrY  = sps->pic_width_in_luma_samples;
+  int PicHeightInSamplesCurrY = sps->pic_height_in_luma_samples;
+  int BitDepthCurrY           = sps->BitDepth_Y;
+  int BitDepthCurrC           = sps->BitDepth_C;
+  int SubWidthCurrC           = sps->SubWidthC;
+  int SubHeightCurrC          = sps->SubHeightC;
+
+  // ... are set equal to the width and height of the decoded direct reference layer picture rlPic
+  int PicWidthInSamplesRefLayerY  = rlPic->get_width();
+  int PicHeightInSamplesRefLayerY = rlPic->get_height();
+
+  // Get the ref layer SPS and pps_extension
+  decoder_context *ctx_ref = ctx->get_multi_layer_decoder()->get_layer_dec(rLId);
+  seq_parameter_set* sps_ref = ctx_ref->current_sps;
+
+  // ... are set equal to the values of BitDepthY, BitDepthC, SubWidthC and SubHeightC of the direct reference layer picture
+  int BitDepthRefLayerY  = sps_ref->BitDepth_Y;
+  int BitDepthRefLayerC  = sps_ref->BitDepth_C;
+  int SubWidthRefLayerC  = sps_ref->SubWidthC;
+  int SubHeightRefLayerC = sps_ref->SubHeightC;
+
+  int RefLayerRegionLeftOffset    = pps_ext->ref_region_left_offset[rLId]   * SubWidthRefLayerC;
+  int RefLayerRegionTopOffset     = pps_ext->ref_region_top_offset[rLId]    * SubHeightRefLayerC;
+  int RefLayerRegionRightOffset   = pps_ext->ref_region_right_offset[rLId]  * SubWidthRefLayerC;
+  int RefLayerRegionBottomOffset  = pps_ext->ref_region_bottom_offset[rLId] * SubHeightRefLayerC;
+
+  int RefLayerRegionWidthInSamplesY  = PicWidthInSamplesRefLayerY - RefLayerRegionLeftOffset - RefLayerRegionRightOffset;
+  int RefLayerRegionHeightInSamplesY = PicHeightInSamplesRefLayerY - RefLayerRegionTopOffset - RefLayerRegionBottomOffset;
+
+  int PicWidthInSamplesCurrC      = PicWidthInSamplesCurrY      / SubWidthCurrC;
+  int PicHeightInSamplesCurrC     = PicHeightInSamplesCurrY     / SubHeightCurrC;
+  int PicWidthInSamplesRefLayerC  = PicWidthInSamplesRefLayerY  / SubWidthRefLayerC;
+  int PicHeightInSamplesRefLayerC = PicHeightInSamplesRefLayerY / SubHeightRefLayerC;
+
+  int ScaledRefLayerLeftOffset   = pps_ext->scaled_ref_layer_left_offset[rLId]   * SubWidthCurrC;
+  int ScaledRefLayerTopOffset    = pps_ext->scaled_ref_layer_top_offset[rLId]    * SubHeightCurrC;
+  int ScaledRefLayerRightOffset  = pps_ext->scaled_ref_layer_right_offset[rLId]  * SubWidthCurrC;
+  int ScaledRefLayerBottomOffset = pps_ext->scaled_ref_layer_bottom_offset[rLId] * SubHeightCurrC;
+
+  int ScaledRefRegionWidthInSamplesY = PicWidthInSamplesCurrY - ScaledRefLayerLeftOffset - ScaledRefLayerRightOffset;
+  int ScaledRefRegionHeightInSamplesY = PicHeightInSamplesCurrY - ScaledRefLayerTopOffset - ScaledRefLayerBottomOffset;
+
+  int SpatialScaleFactorHorY = ((RefLayerRegionWidthInSamplesY  << 16) + (ScaledRefRegionWidthInSamplesY  >> 1)) / ScaledRefRegionWidthInSamplesY;
+  int SpatialScaleFactorVerY = ((RefLayerRegionHeightInSamplesY << 16) + (ScaledRefRegionHeightInSamplesY >> 1)) / ScaledRefRegionHeightInSamplesY;
+  int SpatialScaleFactorHorC = (((RefLayerRegionWidthInSamplesY  / SubWidthRefLayerC ) << 16) + ((ScaledRefRegionWidthInSamplesY  / SubWidthCurrC ) >> 1)) / (ScaledRefRegionWidthInSamplesY  / SubWidthCurrC );
+  int SpatialScaleFactorVerC = (((RefLayerRegionHeightInSamplesY / SubHeightRefLayerC) << 16) + ((ScaledRefRegionHeightInSamplesY / SubHeightCurrC) >> 1)) / (ScaledRefRegionHeightInSamplesY / SubHeightCurrC);
+
+  int PhaseHorY = pps_ext->phase_hor_luma[rLId];
+  int PhaseVerY = pps_ext->phase_ver_luma[rLId];
+  int PhaseHorC = pps_ext->phase_hor_chroma[rLId];
+  int PhaseVerC = pps_ext->phase_ver_chroma[rLId];
+
+  // This is what the reference software does.
+  // TODO: Double check with the actual standard.
+  if (!pps_ext->resample_phase_set_present_flag[rLId]) {
+    PhaseVerC = (4 * PicHeightInSamplesCurrY + (RefLayerRegionHeightInSamplesY >> 1)) / RefLayerRegionHeightInSamplesY - 4;
+  }
+
+  // The following ordered steps are applied to derive the inter-layer reference picture ilRefPic.
+  bool equalPictureSizeAndOffsetFlag = (
+    (PicWidthInSamplesCurrY == PicWidthInSamplesRefLayerY) &&
+    (PicHeightInSamplesCurrY == PicHeightInSamplesRefLayerY) &&
+    (ScaledRefLayerLeftOffset == RefLayerRegionLeftOffset) &&
+    (ScaledRefLayerTopOffset == RefLayerRegionTopOffset) &&
+    (ScaledRefLayerRightOffset == RefLayerRegionRightOffset) &&
+    (ScaledRefLayerBottomOffset == RefLayerRegionBottomOffset) &&
+    (PhaseHorY == 0 && PhaseVerY == 0 && PhaseHorC == 0 && PhaseVerC == 0) );
+
+  bool currColourMappingEnableFlag = false;
+  if (pps_ext->colour_mapping_enabled_flag) {
+    for (int i = 0; i <= pps_ext->cm_table.num_cm_ref_layers_minus1; i++) {
+      if (pps_ext->cm_table.cm_ref_layer_id[i] == rLId) {
+        currColourMappingEnableFlag == true;
+      }
+    }
+  }
+
+  if (ilRefPic[ilRefPicIdx] == NULL) {
+    // Create a new inter layer picture buffer.
+    // No memory for pixel/metadata will be allocated for this picture.
+    ilRefPic[ilRefPicIdx] = new de265_image();
+    de265_chroma c = rlPic->get_chroma_format();
+    ilRefPic[ilRefPicIdx]->alloc_image(PicWidthInSamplesCurrY, PicHeightInSamplesCurrY, c, sps, false, ctx, NULL, 0, 0, false, true);
+  }
+  ilRefPic[ilRefPicIdx]->PicOrderCntVal = rlPic->PicOrderCntVal;          // Copy POC
+  ilRefPic[ilRefPicIdx]->setEqualPictureSizeAndOffsetFlag ( equalPictureSizeAndOffsetFlag );
+  ilRefPic[ilRefPicIdx]->set_lower_layer_picture(rlPic);
+
+  if (equalPictureSizeAndOffsetFlag &&
+     (BitDepthRefLayerY == BitDepthCurrY) &&
+     (BitDepthRefLayerC == BitDepthCurrC) &&
+     (SubWidthRefLayerC == SubWidthCurrC) &&
+     (SubHeightRefLayerC == SubHeightCurrC) &&
+     !currColourMappingEnableFlag) {
+
+    // Equal picture sizes, equal bit depths, no cropping.
+    // SNR scalability. We do not need to perform any upsampling.
+    // Just copy pointers to the lower layer reconstructed pixels
+    ilRefPic[ilRefPicIdx]->get_pixel_pointers_from(rlPic);
+    ilRefPic[ilRefPicIdx]->setInterLayerMotionPredictionEnabled(true);
+  }
+  else {
+    // Something (resolution, bitdepth, aspect ratio) between the layers is different.
+    video_parameter_set_extension *vps_ext = &ctx->current_vps->vps_extension;
+    int currLayerId = ctx->get_layer_id();
+    if (vps_ext->VpsInterLayerSamplePredictionEnabled[vps_ext->LayerIdxInVps[currLayerId]][vps_ext->LayerIdxInVps[rLId]]) {
+
+      // Derive the parameters needed by the reference layer sample location derivation function
+      // as specified in clause H.8.1.4.1.3. These will bee needed when the reference layer sample location derivation
+      // process is invoked.
+      int upsampling_params[2][10];
+      for (int c=0; c<2; c++) {
+        bool chromaFlag = (c != 0);
+
+        // The variables currOffsetLeft, currOffsetTop, refOffsetLeft and refOffsetTop are derived as follows:
+        int currOffsetLeft = ScaledRefLayerLeftOffset / (chromaFlag ? SubWidthCurrC  : 1);              // (H 53)
+        int currOffsetTop  = ScaledRefLayerTopOffset  / (chromaFlag ? SubHeightCurrC : 1);              // (H 54)
+        int refOffsetLeft  = (RefLayerRegionLeftOffset / (chromaFlag ? SubWidthRefLayerC  : 1)) << 4;   // (H 55)
+        int refOffsetTop   = (RefLayerRegionTopOffset  / (chromaFlag ? SubHeightRefLayerC : 1)) << 4;   // (H 56)
+
+        // The variables phaseHor, phaseVer, scaleHor and scaleVer are derived as follows:
+        int phaseHor = chromaFlag ? PhaseHorC : PhaseHorY;                              // (H 57)
+        int phaseVer = chromaFlag ? PhaseVerC : PhaseVerY;                              // (H 58)
+        int scaleHor = chromaFlag ? SpatialScaleFactorHorC : SpatialScaleFactorHorY;    // (H 59)
+        int scaleVer = chromaFlag ? SpatialScaleFactorVerC : SpatialScaleFactorVerY;    // (H 60)
+
+        // The variables addHor and addVer are derived as follows:
+        int addHor = -(( scaleHor * phaseHor + 8) >> 4 );   // (H 61)
+        int addVer = -(( scaleVer * phaseVer + 8) >> 4 );   // (H 62)
+
+        // Bit depth of reference and current layer
+        int bitDepthRef = chromaFlag ? BitDepthRefLayerC : BitDepthRefLayerY;
+        int bitDepthCur = chromaFlag ? BitDepthCurrC     : BitDepthCurrY;
+
+        // Put parameters into array
+        upsampling_params[c][0] = currOffsetLeft;
+        upsampling_params[c][1] = currOffsetTop;
+        upsampling_params[c][2] = refOffsetLeft;
+        upsampling_params[c][3] = refOffsetTop;
+        upsampling_params[c][4] = scaleHor;
+        upsampling_params[c][5] = scaleVer;
+        upsampling_params[c][6] = addHor;
+        upsampling_params[c][7] = addVer;
+        upsampling_params[c][8] = bitDepthRef;
+        upsampling_params[c][9] = bitDepthCur;
+      }
+
+      ilRefPic[ilRefPicIdx]->set_inter_layer_upsampling_parameters(upsampling_params);
+
+      if (currColourMappingEnableFlag) {
+        // We will have to apply color mapping.
+        // Maybe also upsampling
+        assert(false);  // TODO
+
+        //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
+
+        //// Create temporary image
+        //de265_image img;
+        //de265_image* src = rlPic;
+        //img.alloc_image(src->get_width(), src->get_height(), src->get_chroma_format(), &src->sps, false,
+        //                        src->decctx, src->encctx, src->pts, src->user_data, false);
+
+        //// The colour mapping process as specified in clause H.8.1.4.3 is invoked
+        //int colourMappingParams[2] = {SubWidthRefLayerC, SubHeightRefLayerC };
+        //img.colour_mapping( ctx, rlPic, &pps_ext->cm_table, colourMappingParams );
+
+        //if (equalPictureSizeAndOffsetFlag) {
+        //  ilRefPic[ilRefPicIdx]->copy_lines_from(&img, 0, rlPic->get_height());  // Copy pixel data
+        //}
+        //else {
+        //  // The picture sample resampling process as specified in clause H.8.1.4.1 is invoked
+        //  ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, &img, upsampling_params);
+        //}
+      }
+      else {
+        // The picture has to be upsampled but no color mapping is required.
+
+        // the picture sample resampling process as specified in clause H.8.1.4.1 is invoked
+        //ilRefPic[ilRefPicIdx]->upsample_image_from(ctx, rlPic, upsampling_params);
+
+        //// DEBUG. DUMP TO FILE
+        //FILE *fp = fopen("before_upsampling.txt", "wb");
+        //int nrBytesY = rlPic->get_width() * rlPic->get_height();
+        //int nrBytesUV = nrBytesY / 4;
+        //uint8_t *srcY = rlPic->get_image_plane(0);
+        //uint8_t *srcU = rlPic->get_image_plane(1);
+        //uint8_t *srcV = rlPic->get_image_plane(2);
+        //fwrite(srcY, sizeof(uint8_t), nrBytesY, fp);
+        //fwrite(srcU, sizeof(uint8_t), nrBytesUV, fp);
+        //fwrite(srcV, sizeof(uint8_t), nrBytesUV, fp);
+        //fclose(fp);
+        //// DEBUG. DUMP TO FILE
+        //fp = fopen("after_upsampling.txt", "wb");
+        //nrBytesY = ilRefPic[ilRefPicIdx]->get_width() * ilRefPic[ilRefPicIdx]->get_height();
+        //nrBytesUV = nrBytesY / 4;
+        //uint8_t *dstY = ilRefPic[ilRefPicIdx]->get_image_plane(0);
+        //uint8_t *dstU = ilRefPic[ilRefPicIdx]->get_image_plane(1);
+        //uint8_t *dstV = ilRefPic[ilRefPicIdx]->get_image_plane(2);
+        //fwrite(dstY, sizeof(uint8_t), nrBytesY, fp);
+        //fwrite(dstU, sizeof(uint8_t), nrBytesUV, fp);
+        //fwrite(dstV, sizeof(uint8_t), nrBytesUV, fp);
+        //fclose(fp);
+      }
+    }
+
+    bool ilPred = vps_ext->VpsInterLayerMotionPredictionEnabled[vps_ext->LayerIdxInVps[currLayerId]][vps_ext->LayerIdxInVps[rLId]];
+    ilRefPic[ilRefPicIdx]->setInterLayerMotionPredictionEnabled(ilPred);
+    if (ilPred) {
+      if (!equalPictureSizeAndOffsetFlag) {
+        // The picture motion and mode parameters resampling process as specified in clause H.8.1.4.2 is invoked
+        int scaling_parameters[10] = {ScaledRefLayerLeftOffset, ScaledRefLayerTopOffset,
+                                      SpatialScaleFactorHorY, SpatialScaleFactorVerY,
+                                      RefLayerRegionLeftOffset, RefLayerRegionTopOffset,
+                                      ScaledRefRegionWidthInSamplesY, RefLayerRegionWidthInSamplesY,
+                                      ScaledRefRegionHeightInSamplesY, RefLayerRegionHeightInSamplesY};
+        ilRefPic[ilRefPicIdx]->set_inter_layer_metadata_scaling_parameters(scaling_parameters);
+      }
+    }
+
+    ilRefPic_upsampled = true;
+  }
+}
 
 /* 8.3.2   invoked once per picture
 
@@ -1587,6 +2066,7 @@ void decoder_context::process_reference_picture_set(decoder_context* ctx, slice_
    - the RefPicList[2][], containing indices into the DPB, and
    - the RefPicList_POC[2][], containing POCs.
    - LongTermRefPic[2][] is also set to true if it is a long-term reference
+   - InterLayerRefPic[2][] is set to true if it is an inter layer reference picture
  */
 bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, slice_segment_header* hdr)
 {
@@ -1598,8 +2078,14 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
   int RefPicListTemp0[3*MAX_NUM_REF_PICS]; // TODO: what would be the correct maximum ?
   int RefPicListTemp1[3*MAX_NUM_REF_PICS]; // TODO: what would be the correct maximum ?
   char isLongTerm[2][3*MAX_NUM_REF_PICS];
+  bool isInterLayer[2][3*MAX_NUM_REF_PICS];
 
   memset(isLongTerm,0,2*3*MAX_NUM_REF_PICS);
+  for (int i = 0; i < 2; i++) {
+    for (int j=0; j<3*MAX_NUM_REF_PICS; j++) {
+      isInterLayer[i][j] = false;
+    }
+  }
 
   /* --- Fill RefPicListTmp0 with reference pictures in this order:
      1) short term, past POC
@@ -1612,12 +2098,26 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
     for (int i=0;i<ctx->NumPocStCurrBefore && rIdx<NumRpsCurrTempList0; rIdx++,i++)
       RefPicListTemp0[rIdx] = ctx->RefPicSetStCurrBefore[i];
 
+    // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-64)
+    for (int i = 0; i<ctx->NumActiveRefLayerPics0; rIdx++, i++) {
+      RefPicListTemp0[rIdx] = ctx->RefPicSetInterLayer0[i];
+      isInterLayer[0][rIdx] = true;
+      isLongTerm[0][rIdx] = true; // IL-pred picture is marked as long term reference
+    }
+
     for (int i=0;i<ctx->NumPocStCurrAfter && rIdx<NumRpsCurrTempList0; rIdx++,i++)
       RefPicListTemp0[rIdx] = ctx->RefPicSetStCurrAfter[i];
 
     for (int i=0;i<ctx->NumPocLtCurr && rIdx<NumRpsCurrTempList0; rIdx++,i++) {
       RefPicListTemp0[rIdx] = ctx->RefPicSetLtCurr[i];
       isLongTerm[0][rIdx] = true;
+    }
+
+    // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-64)
+    for( int i=0; i<ctx->NumActiveRefLayerPics1; rIdx++, i++ ) {
+      RefPicListTemp0[rIdx] = ctx->RefPicSetInterLayer1[i];
+      isInterLayer[0][rIdx] = true;
+      isLongTerm[0][rIdx] = true; // IL-pred picture is marked as long term reference
     }
 
     // This check is to prevent an endless loop when no images are added above.
@@ -1627,22 +2127,36 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
     }
   }
 
-  if (hdr->num_ref_idx_l0_active > 15) {
+  /*
+  if (hdr->num_ref_idx_l0_active > 16) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
     return false;
   }
+  */
 
+  assert(hdr->num_ref_idx_l0_active <= 16);
   for (rIdx=0; rIdx<hdr->num_ref_idx_l0_active; rIdx++) {
     int idx = hdr->ref_pic_list_modification_flag_l0 ? hdr->list_entry_l0[rIdx] : rIdx;
 
     hdr->RefPicList[0][rIdx] = RefPicListTemp0[idx];
     hdr->LongTermRefPic[0][rIdx] = isLongTerm[0][idx];
+    hdr->InterLayerRefPic[0][rIdx] = isInterLayer[0][idx];
 
     // remember POC of referenced image (needed in motion.c, derive_collocated_motion_vector)
-    hdr->RefPicList_POC[0][rIdx] = ctx->dpb.get_image(hdr->RefPicList[0][rIdx])->PicOrderCntVal;
-    hdr->RefPicList_PicState[0][rIdx] = ctx->dpb.get_image(hdr->RefPicList[0][rIdx])->PicState;
+    de265_image* img_0_rIdx = NULL;
+    if (hdr->InterLayerRefPic[0][rIdx]) {
+      // Get the inter layer reference from ilRefPic
+      img_0_rIdx = ilRefPic[hdr->RefPicList[0][rIdx]];
+    }
+    else {
+      img_0_rIdx = ctx->dpb.get_image(hdr->RefPicList[0][rIdx]);
+    }
+    if (img_0_rIdx==NULL) {
+      return false;
+    }
+    hdr->RefPicList_POC[0][rIdx] = img_0_rIdx->PicOrderCntVal;
+    hdr->RefPicList_PicState[0][rIdx] = img_0_rIdx->PicState;
   }
-
 
   /* --- Fill RefPicListTmp1 with reference pictures in this order:
      1) short term, future POC
@@ -1655,33 +2169,88 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
 
     int rIdx=0;
     while (rIdx < NumRpsCurrTempList1) {
-      for (int i=0;i<ctx->NumPocStCurrAfter && rIdx<NumRpsCurrTempList1; rIdx++,i++)
+      for (int i=0;i<ctx->NumPocStCurrAfter && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetStCurrAfter[i];
+      }
 
-      for (int i=0;i<ctx->NumPocStCurrBefore && rIdx<NumRpsCurrTempList1; rIdx++,i++)
+      // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-66)
+      for( int i=0;i<ctx->NumActiveRefLayerPics1; rIdx++, i++ ) {
+        RefPicListTemp1[rIdx] = ctx->RefPicSetInterLayer1[ i ];
+        isInterLayer[1][rIdx] = true;
+        isLongTerm[1][rIdx] = true; // IL-pred picture is marked as long term reference
+      }
+
+      for (int i=0;i<ctx->NumPocStCurrBefore && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetStCurrBefore[i];
+      }
 
       for (int i=0;i<ctx->NumPocLtCurr && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetLtCurr[i];
         isLongTerm[1][rIdx] = true;
       }
+
+      // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-66)
+      for( int i=0;i<ctx->NumActiveRefLayerPics0; rIdx++, i++ ) {
+        RefPicListTemp1[rIdx]=ctx->RefPicSetInterLayer0[i];
+        isInterLayer[1][rIdx] = true;
+        isLongTerm[1][rIdx] = true; // IL-pred picture is marked as long term reference
+      }
+
+      // This check is to prevent an endless loop when no images are added above.
+      if (rIdx==0) {
+        ctx->add_warning(DE265_WARNING_FAULTY_REFERENCE_PICTURE_LIST, false);
+        return false;
+      }
     }
 
-    assert(hdr->num_ref_idx_l1_active <= 15);
+    if (hdr->num_ref_idx_l0_active > 16) {
+    ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+    return false;
+  }
+
+    assert(hdr->num_ref_idx_l1_active <= 16);
     for (rIdx=0; rIdx<hdr->num_ref_idx_l1_active; rIdx++) {
       int idx = hdr->ref_pic_list_modification_flag_l1 ? hdr->list_entry_l1[rIdx] : rIdx;
 
       hdr->RefPicList[1][rIdx] = RefPicListTemp1[idx];
       hdr->LongTermRefPic[1][rIdx] = isLongTerm[1][idx];
+      hdr->InterLayerRefPic[1][rIdx] = isInterLayer[1][idx];
 
       // remember POC of referenced imaged (needed in motion.c, derive_collocated_motion_vector)
-      hdr->RefPicList_POC[1][rIdx] = ctx->dpb.get_image(hdr->RefPicList[1][rIdx])->PicOrderCntVal;
-      hdr->RefPicList_PicState[1][rIdx] = ctx->dpb.get_image(hdr->RefPicList[1][rIdx])->PicState;
+      de265_image* img_1_rIdx = NULL;
+      if (hdr->InterLayerRefPic[1][rIdx]) {
+        // Inter layer picture. Get the inter layer reference from ilRefPic.
+        img_1_rIdx = ilRefPic[hdr->RefPicList[1][rIdx]];
+      }
+      else {
+        img_1_rIdx = ctx->dpb.get_image(hdr->RefPicList[1][rIdx]);
+      }
+      if (img_1_rIdx == NULL) { return false; }
+      hdr->RefPicList_POC[1][rIdx] = img_1_rIdx->PicOrderCntVal;
+      hdr->RefPicList_PicState[1][rIdx] = img_1_rIdx->PicState;
     }
   }
 
 
   // show reference picture lists
+
+  if (ctx->get_layer_id() > 0) {
+    int nrRefDirs = (hdr->slice_type == SLICE_TYPE_B) ? 2 : 1;
+    for (int i = 0; i < nrRefDirs; i++) {
+      int numRefIdxActive = (i==0) ? hdr->num_ref_idx_l0_active : hdr->num_ref_idx_l1_active;
+      loginfo(LogHeaders,"RefPicList[%d] =", i);
+      for (rIdx=0; rIdx<numRefIdxActive; rIdx++) {
+      loginfo(LogHeaders,"* [%d]=%d (LT=%d) (IL=%d)",
+              hdr->RefPicList[i][rIdx],
+              hdr->RefPicList_POC[i][rIdx],
+              hdr->LongTermRefPic[i][rIdx],
+              hdr->InterLayerRefPic[i][rIdx]
+              );
+      }
+      loginfo(LogHeaders,"*\n");
+    }
+    return true;
+  }
 
   loginfo(LogHeaders,"RefPicList[0] =");
   for (rIdx=0; rIdx<hdr->num_ref_idx_l0_active; rIdx++) {
@@ -1823,7 +2392,7 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
 
   ctx->current_pps = &ctx->pps[pps_id];
   ctx->current_sps = &ctx->sps[ (int)ctx->current_pps->seq_parameter_set_id ];
-  ctx->current_vps = &ctx->vps[ (int)ctx->current_sps->video_parameter_set_id ];
+  ctx->current_vps = get_vps((int)ctx->current_sps->video_parameter_set_id);
 
   calc_tid_and_framerate_ratio();
 
@@ -1857,7 +2426,7 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
     ctx->img = img;
 
     img->vps = *ctx->current_vps;
-    img->sps = *ctx->current_sps;
+    //img->sps = *ctx->current_sps;  // already set in new_image()
     img->pps = *ctx->current_pps;
     img->decctx = ctx;
 
@@ -1897,6 +2466,11 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
     process_picture_order_count(ctx,hdr);
 
     if (hdr->first_slice_segment_in_pic_flag) {
+      // Multi layer extension
+      if (layer_ID > 0) {
+        process_inter_layer_reference_picture_set(ctx,hdr);
+      }
+
       // mark picture so that it is not overwritten by unavailable reference frames
       img->PicState = UsedForShortTermReference;
 
@@ -1911,6 +2485,13 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
     // next image is not the first anymore
 
     first_decoded_picture = false;
+  }
+  else {
+    // claims to be not the first slice, but there is no active image available
+
+    if (ctx->img == NULL) {
+      return false;
+    }
   }
 
   if (hdr->slice_type == SLICE_TYPE_B ||
@@ -2112,4 +2693,16 @@ de265_error error_queue::get_warning()
   memmove(warnings, &warnings[1], nWarnings*sizeof(de265_error));
 
   return warn;
+}
+
+video_parameter_set* decoder_context::get_vps(int id)
+{
+  assert( id < DE265_MAX_VPS_SETS );
+  if (layer_ID != 0) {
+    // Multi layer decoding.
+    // The VPS is handeled by the base layer decoder. Get it there.
+    decoder_context_multilayer* ml_dec = get_multi_layer_decoder();
+    return ml_dec->get_layer_dec(0)->get_vps(id);
+  }
+  return &vps[id];
 }

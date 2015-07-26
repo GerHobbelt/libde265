@@ -25,13 +25,39 @@
 #include <stdint.h>
 
 
-void transform_skip_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
-void transform_bypass_8_fallback(uint8_t *dst, int16_t *coeffs, int nT, ptrdiff_t stride);
+// --- decoding ---
 
-void transform_4x4_luma_add_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
-void transform_4x4_add_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
-void transform_8x8_add_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
-void transform_16x16_add_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
-void transform_32x32_add_8_fallback(uint8_t *dst, int16_t *coeffs, ptrdiff_t stride);
+void transform_skip_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+void transform_bypass_8_fallback(uint8_t *dst, const int16_t *coeffs, int nT, ptrdiff_t stride);
+
+void transform_4x4_luma_add_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+void transform_4x4_add_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+void transform_8x8_add_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+void transform_16x16_add_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+void transform_32x32_add_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride);
+
+
+void transform_skip_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+void transform_bypass_16_fallback(uint16_t *dst, const int16_t *coeffs, int nT, ptrdiff_t stride, int bit_depth);
+
+void transform_4x4_luma_add_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+void transform_4x4_add_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+void transform_8x8_add_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+void transform_16x16_add_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+void transform_32x32_add_16_fallback(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth);
+
+
+// --- encoding ---
+
+void fdst_4x4_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void fdct_4x4_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void fdct_8x8_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void fdct_16x16_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void fdct_32x32_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+
+void hadamard_4x4_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void hadamard_8x8_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void hadamard_16x16_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
+void hadamard_32x32_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride);
 
 #endif

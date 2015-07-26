@@ -39,21 +39,19 @@
 #define MAX_CU_SIZE 64
 
 
-
 static int extra_before[4] = { 0,3,3,2 };
 static int extra_after [4] = { 0,3,4,4 };
 
 
 
-void mc_luma(const decoder_context* ctx,
-             const de265_image* img, int mv_x, int mv_y,
+template <class pixel_t>
+void mc_luma(const base_context* ctx,
+             const seq_parameter_set* sps, int mv_x, int mv_y,
              int xP,int yP,
              int16_t* out, int out_stride,
-             uint8_t* ref, int ref_stride,
-             int nPbW, int nPbH)
+             const pixel_t* ref, int ref_stride,
+             int nPbW, int nPbH, int bitDepth_L)
 {
-  const seq_parameter_set* sps = &img->sps;
-
   int xFracL = mv_x & 3;
   int yFracL = mv_y & 3;
 
@@ -72,17 +70,14 @@ void mc_luma(const decoder_context* ctx,
   ALIGNED_16(int16_t) mcbuffer[MAX_CU_SIZE * (MAX_CU_SIZE+7)];
 
   if (xFracL==0 && yFracL==0) {
-    if (xIntOffsL >= 0 && yIntOffsL >= 0 &&
-        nPbW+xIntOffsL <= w && nPbH+yIntOffsL <= h) {
-    }
 
     if (xIntOffsL >= 0 && yIntOffsL >= 0 &&
         nPbW+xIntOffsL <= w && nPbH+yIntOffsL <= h) {
 
-      ctx->acceleration.put_hevc_qpel_8[0][0](out, out_stride,
-                                          &ref[yIntOffsL*ref_stride + xIntOffsL],
-                                          ref_stride,
-                                          nPbW,nPbH, mcbuffer);
+      ctx->acceleration.put_hevc_qpel(out, out_stride,
+                                      &ref[yIntOffsL*ref_stride + xIntOffsL],
+                                      ref_stride /* sizeof(pixel_t)*/,
+                                      nPbW,nPbH, mcbuffer, 0,0, bitDepth_L);
     }
     else {
       for (int y=0;y<nPbH;y++)
@@ -130,9 +125,9 @@ void mc_luma(const decoder_context* ctx,
     //int nPbH_extra = extra_top  + nPbH + extra_bottom;
 
 
-    uint8_t padbuf[(MAX_CU_SIZE+16)*(MAX_CU_SIZE+7)];
+    pixel_t padbuf[(MAX_CU_SIZE+16)*(MAX_CU_SIZE+7)];
 
-    uint8_t* src_ptr;
+    const pixel_t* src_ptr;
     int src_stride;
 
     if (-extra_left + xIntOffsL >= 0 &&
@@ -157,9 +152,9 @@ void mc_luma(const decoder_context* ctx,
       src_stride = MAX_CU_SIZE+16;
     }
 
-    ctx->acceleration.put_hevc_qpel_8[xFracL][yFracL](out, out_stride,
-                                                  src_ptr, src_stride,
-                                                  nPbW,nPbH, mcbuffer);
+    ctx->acceleration.put_hevc_qpel(out, out_stride,
+                                    src_ptr, src_stride /* sizeof(pixel_t) */,
+                                    nPbW,nPbH, mcbuffer, xFracL,yFracL, bitDepth_L);
 
 
     logtrace(LogMotion,"---V---\n");
@@ -174,16 +169,15 @@ void mc_luma(const decoder_context* ctx,
 
 
 
-void mc_chroma(const decoder_context* ctx,
-               const de265_image* img,
+template <class pixel_t>
+void mc_chroma(const base_context* ctx,
+               const seq_parameter_set* sps,
                int mv_x, int mv_y,
                int xP,int yP,
                int16_t* out, int out_stride,
-               uint8_t* ref, int ref_stride,
-               int nPbWC, int nPbHC)
+               const pixel_t* ref, int ref_stride,
+               int nPbWC, int nPbHC, int bit_depth_C)
 {
-  const seq_parameter_set* sps = &img->sps;
-
   // chroma sample interpolation process (8.5.3.2.2.2)
 
   //const int shift1 = sps->BitDepth_C-8;
@@ -204,9 +198,9 @@ void mc_chroma(const decoder_context* ctx,
   if (xFracC == 0 && yFracC == 0) {
     if (xIntOffsC>=0 && nPbWC+xIntOffsC<=wC &&
         yIntOffsC>=0 && nPbHC+yIntOffsC<=hC) {
-      ctx->acceleration.put_hevc_epel_8(out, out_stride,
-                                    &ref[xIntOffsC + yIntOffsC*ref_stride], ref_stride,
-                                    nPbWC,nPbHC, 0,0, NULL);
+      ctx->acceleration.put_hevc_epel(out, out_stride,
+                                      &ref[xIntOffsC + yIntOffsC*ref_stride], ref_stride,
+                                      nPbWC,nPbHC, 0,0, NULL, bit_depth_C);
     }
     else
       {
@@ -221,9 +215,9 @@ void mc_chroma(const decoder_context* ctx,
       }
   }
   else {
-    uint8_t padbuf[(MAX_CU_SIZE+16)*(MAX_CU_SIZE+3)];
+    pixel_t padbuf[(MAX_CU_SIZE+16)*(MAX_CU_SIZE+3)];
 
-    uint8_t* src_ptr;
+    const pixel_t* src_ptr;
     int src_stride;
 
     int extra_top  = 1;
@@ -253,19 +247,19 @@ void mc_chroma(const decoder_context* ctx,
 
 
     if (xFracC && yFracC) {
-      ctx->acceleration.put_hevc_epel_hv_8(out, out_stride,
-                                       src_ptr, src_stride,
-                                       nPbWC,nPbHC, xFracC,yFracC, mcbuffer);
+      ctx->acceleration.put_hevc_epel_hv(out, out_stride,
+                                         src_ptr, src_stride,
+                                         nPbWC,nPbHC, xFracC,yFracC, mcbuffer, bit_depth_C);
     }
     else if (xFracC) {
-      ctx->acceleration.put_hevc_epel_h_8(out, out_stride,
-                                      src_ptr, src_stride,
-                                      nPbWC,nPbHC, xFracC,yFracC, mcbuffer);
+      ctx->acceleration.put_hevc_epel_h(out, out_stride,
+                                        src_ptr, src_stride,
+                                        nPbWC,nPbHC, xFracC,yFracC, mcbuffer, bit_depth_C);
     }
     else if (yFracC) {
-      ctx->acceleration.put_hevc_epel_v_8(out, out_stride,
-                                      src_ptr, src_stride,
-                                      nPbWC,nPbHC, xFracC,yFracC, mcbuffer);
+      ctx->acceleration.put_hevc_epel_v(out, out_stride,
+                                        src_ptr, src_stride,
+                                        nPbWC,nPbHC, xFracC,yFracC, mcbuffer, bit_depth_C);
     }
     else {
       assert(false); // full-pel shifts are handled above
@@ -273,28 +267,227 @@ void mc_chroma(const decoder_context* ctx,
   }
 }
 
+template <class pixel_t>
+void upsample_luma(const base_context* ctx,
+             int xP,int yP,
+             int16_t* out, int out_stride,
+             const pixel_t* ref, int ref_stride,
+             int ref_pic_width_in_luma_samples,
+             int ref_pic_height_in_luma_samples,
+             int ref_BitDepth_Y,
+             int nPbW, int nPbH, int bitDepth_L,
+             const int* position_params)
+{  
+  // Calculate the block position (top left) and the size of the block in the reference (scaled)
+  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int nPbW_src = xP_right - xP_src;
+  int nPbH_src = yP_bottom - yP_src;
+  
+  if (xP_src >= 3 && yP_src >= 3 &&
+      xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
+    // The block to upsample is entirely within the reference picture (no clipping required)
+    ctx->acceleration.resample_block_luma(&ref[yP_src*ref_stride + xP_src], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
+    
+    // Upsample the block ref to mcbuffer
+    //printf("Upsample Pos(%i,%i)\n", xP, yP);
+  }
+  else {
+    // We need to apply padding on the input samples. 
+    // !! The input samples are subsampled !!
+    int extra_left   = 3;
+    int extra_right  = 4;
+    int extra_top    = 3;
+    int extra_bottom = 4;
 
+    pixel_t padbuf[(MAX_CU_SIZE+7)*(MAX_CU_SIZE+16)];  // +7 would also work but this is better for sligned memory (SSE)
+    int pad_stride = MAX_CU_SIZE+16;
+    
+    // Apply padding in the padding buffer
+    for (int y=-extra_top;y<nPbH_src+extra_bottom;y++) {
+      for (int x=-extra_left;x<nPbW_src+extra_right;x++) {
+
+        int xA = Clip3(0,ref_pic_width_in_luma_samples-1,x + xP_src);
+        int yA = Clip3(0,ref_pic_height_in_luma_samples-1,y + yP_src);
+
+        padbuf[x+extra_left + (y+extra_top)*pad_stride] = ref[ xA + yA*ref_stride ];
+      }
+    }
+
+    // Resample from the padding buffer to output
+    const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
+    ctx->acceleration.resample_block_luma(pad_ptr, pad_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
+
+    //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
+
+    logtrace(LogMotion,"---V---\n");
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+        logtrace(LogMotion,"%04x ",out[x+y*out_stride]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+  }
+
+#ifdef DE265_LOG_TRACE
+    logtrace(LogMotion,"---MC luma %d %d = direct---\n",xFracL,yFracL);
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        int xA = Clip3(0,w-1,x + xP);
+        int yA = Clip3(0,h-1,y + yP);
+
+        logtrace(LogMotion,"%02x ", ref[ xA + yA*ref_stride ]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+
+    logtrace(LogMotion," -> \n");
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        logtrace(LogMotion,"%02x ",out[y*out_stride+x] >> 6); // 6 will be used when summing predictions
+      }
+      logtrace(LogMotion,"\n");
+    }
+#endif
+}
+
+template <class pixel_t>
+void upsample_chroma(const base_context* ctx,
+             int xP,int yP,
+             int16_t* out, int out_stride,
+             const pixel_t* ref, int ref_stride,
+             int ref_pic_width_in_chroma_samples,
+             int ref_pic_height_in_chroma_samples,
+             int ref_BitDepth_Y,
+             int nPbW, int nPbH, int bitDepth_C,
+             const int* position_params)
+{  
+  xP = xP / 2;
+  yP = yP / 2;
+
+   // Calculate the block position (top left) and the size of the block in the reference (scaled)
+  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+
+  int nPbW_src = xP_right - xP_src;
+  int nPbH_src = yP_bottom - yP_src;
+
+  if (xP_src >= 1 && yP_src >= 1 &&
+      xP_right+2 <= ref_pic_width_in_chroma_samples && yP_bottom+2 <= ref_pic_height_in_chroma_samples) {
+    // The block to upsample is entirely within the picture (no clipping required)
+    ctx->acceleration.resample_block_chroma(&ref[yP_src*ref_stride + xP_src], ref_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+    
+    // Upsample the block ref to mcbuffer
+    //printf("C: Upsample Pos(%i,%i)\n", xP, yP);
+  }
+  else {
+    // We need to apply padding on the input samples. 
+    // !! The input samples are subsampled !!
+    int extra_left   = 1;
+    int extra_right  = 2;
+    int extra_top    = 1;
+    int extra_bottom = 2;
+
+    pixel_t padbuf[((MAX_CU_SIZE/2)+3)*((MAX_CU_SIZE/2)+16)];  // +3 would also work but this is better for sligned memory (SSE)
+    int pad_stride = (MAX_CU_SIZE/2)+16;
+    
+    for (int y=-extra_top;y<=nPbH_src+extra_bottom;y++) {
+      int yA = Clip3(0,ref_pic_height_in_chroma_samples-1,y + yP_src);
+      
+      for (int x=-extra_left;x<=nPbW_src+extra_right;x++) {
+        int xA = Clip3(0,ref_pic_width_in_chroma_samples-1,x + xP_src);
+
+        padbuf[x+extra_left + (y+extra_top)*pad_stride] = ref[ xA + yA*ref_stride ];
+      }
+    }
+
+    // Resample from the padding buffer to output
+    const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
+    ctx->acceleration.resample_block_chroma(pad_ptr, pad_stride, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+
+    //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
+
+    logtrace(LogMotion,"---V---\n");
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+        logtrace(LogMotion,"%04x ",out[x+y*out_stride]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+  }
+
+#ifdef DE265_LOG_TRACE
+    logtrace(LogMotion,"---MC luma %d %d = direct---\n",xFracL,yFracL);
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        int xA = Clip3(0,w-1,x + xP);
+        int yA = Clip3(0,h-1,y + yP);
+
+        logtrace(LogMotion,"%02x ", ref[ xA + yA*ref_stride ]);
+      }
+      logtrace(LogMotion,"\n");
+    }
+
+    logtrace(LogMotion," -> \n");
+
+    for (int y=0;y<nPbH;y++) {
+      for (int x=0;x<nPbW;x++) {
+
+        logtrace(LogMotion,"%02x ",out[y*out_stride+x] >> 6); // 6 will be used when summing predictions
+      }
+      logtrace(LogMotion,"\n");
+    }
+#endif
+}
 
 // 8.5.3.2
 // NOTE: for full-pel shifts, we can introduce a fast path, simply copying without shifts
-void generate_inter_prediction_samples(decoder_context* ctx,
+void generate_inter_prediction_samples(base_context* ctx,
+                                       const slice_segment_header* shdr,
                                        de265_image* img,
-                                       slice_segment_header* shdr,
                                        int xC,int yC,
                                        int xB,int yB,
                                        int nCS, int nPbW,int nPbH,
-                                       const VectorInfo* vi)
+                                       const MotionVectorSpec* vi)
 {
-  ALIGNED_16(int16_t) predSamplesL                 [2 /* LX */][MAX_CU_SIZE* MAX_CU_SIZE];
-  ALIGNED_16(int16_t) predSamplesC[2 /* chroma */ ][2 /* LX */][MAX_CU_SIZE* MAX_CU_SIZE];
-
   int xP = xC+xB;
   int yP = yC+yB;
 
-  int predFlag[2];
-  predFlag[0] = vi->lum.predFlag[0];
-  predFlag[1] = vi->lum.predFlag[1];
+  void*  pixels[3];
+  int    stride[3];
 
+  pixels[0] = img->get_image_plane_at_pos_any_depth(0,xP,yP);
+  stride[0] = img->get_image_stride(0);
+
+  pixels[1] = img->get_image_plane_at_pos_any_depth(1,xP/2,yP/2);
+  stride[1] = img->get_image_stride(1);
+
+  pixels[2] = img->get_image_plane_at_pos_any_depth(2,xP/2,yP/2);
+  stride[2] = img->get_image_stride(2);
+
+
+  ALIGNED_16(int16_t) predSamplesL                 [2 /* LX */][MAX_CU_SIZE* MAX_CU_SIZE];
+  ALIGNED_16(int16_t) predSamplesC[2 /* chroma */ ][2 /* LX */][MAX_CU_SIZE* MAX_CU_SIZE];
+
+  //int xP = xC+xB;
+  //int yP = yC+yB;
+
+  int predFlag[2];
+  predFlag[0] = vi->predFlag[0];
+  predFlag[1] = vi->predFlag[1];
+
+  const int bit_depth_L = img->sps.BitDepth_Y;
+  const int bit_depth_C = img->sps.BitDepth_C;
 
   // Some encoders use bi-prediction with two similar MVs.
   // Identify this case and use only one MV.
@@ -302,10 +495,10 @@ void generate_inter_prediction_samples(decoder_context* ctx,
   // do this only without weighted prediction, because the weights/offsets may be different
   if (img->pps.weighted_pred_flag==0) {
     if (predFlag[0] && predFlag[1]) {
-      if (vi->lum.mv[0].x == vi->lum.mv[1].x &&
-          vi->lum.mv[0].y == vi->lum.mv[1].y &&
-          shdr->RefPicList[0][vi->lum.refIdx[0]] ==
-          shdr->RefPicList[1][vi->lum.refIdx[1]]) {
+      if (vi->mv[0].x == vi->mv[1].x &&
+          vi->mv[0].y == vi->mv[1].y &&
+          shdr->RefPicList[0][vi->refIdx[0]] == shdr->RefPicList[1][vi->refIdx[1]] &&
+          shdr->InterLayerRefPic[vi->refIdx[0]] == shdr->InterLayerRefPic[vi->refIdx[1]] ) {
         predFlag[1] = 0;
       }
     }
@@ -316,40 +509,134 @@ void generate_inter_prediction_samples(decoder_context* ctx,
     if (predFlag[l]) {
       // 8.5.3.2.1
 
-      if (vi->lum.refIdx[l] >= MAX_NUM_REF_PICS) {
+      if (vi->refIdx[l] >= MAX_NUM_REF_PICS) {
         img->integrity = INTEGRITY_DECODING_ERRORS;
         ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
         return;
       }
 
-      de265_image* refPic;
-      refPic = ctx->get_image(shdr->RefPicList[l][vi->lum.refIdx[l]]);
+      // Get the image from DPB or the inter layer picture buffer.
+      int ref_idx = shdr->RefPicList[l][vi->refIdx[l]];
+      bool il_pic = shdr->InterLayerRefPic[l][vi->refIdx[l]];
+      const de265_image* refPic = ctx->get_image(ref_idx, il_pic);
 
-      logtrace(LogMotion, "refIdx: %d -> dpb[%d]\n", vi->lum.refIdx[l], shdr->RefPicList[l][vi->lum.refIdx[l]]);
-
+      logtrace(LogMotion, "refIdx: %d -> %s[%d]\n", vi->refIdx[l], il_pic ? "ilp" : "dpb" , shdr->RefPicList[l][vi->refIdx[l]]);
+      
       if (refPic->PicState == UnusedForReference) {
         img->integrity = INTEGRITY_DECODING_ERRORS;
         ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+
+        // TODO: fill predSamplesC with black or grey
       }
       else {
         // 8.5.3.2.2
 
         logtrace(LogMotion,"do MC: L%d,MV=%d;%d RefPOC=%d\n",
-                 l,vi->lum.mv[l].x,vi->lum.mv[l].y,refPic->PicOrderCntVal);
+                 l,vi->mv[l].x,vi->mv[l].y,refPic->PicOrderCntVal);
 
+        if (shdr->InterLayerRefPic[l][vi->refIdx[l]] && (vi->mv[l].x != 0 || vi->mv[l].y != 0)) {
+          // It is bitstream conformance that inter layer prediction may only be performed
+          // with a zero motion vector. We can still perform this but something might have
+          // gone wrong.
+          ctx->add_warning(DE265_WARNING_MULTILAYER_NON_ZERO_MV_FOR_INTER_LAYER_PREDICTION, false); 
+        }
 
-        // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
-        mc_luma(ctx, img, vi->lum.mv[l].x, vi->lum.mv[l].y, xP,yP,
-                predSamplesL[l],nCS,
-                refPic->get_image_plane(0),refPic->get_luma_stride(), nPbW,nPbH);
+        if (refPic->is_inter_layer_reference_picture() && !refPic->getEqualPictureSizeAndOffsetFlag()) {
+          // The reference picture is an inter layer picture and has to be upsampled.
 
+          // Upsample luma
+          if (img->high_bit_depth(0)) {
+            upsample_luma(ctx, xP, yP, predSamplesL[l],nCS,
+                    (const uint16_t*)refPic->get_il_refPic()->get_image_plane(0),
+                    refPic->get_il_refPic()->get_luma_stride(),
+                    refPic->get_il_refPic()->get_width(), 
+                    refPic->get_il_refPic()->get_height(),
+                    refPic->get_il_refPic()->get_bit_depth(0),
+                    nPbW,nPbH, bit_depth_L,
+                    refPic->get_upsampling_parameters(false));
+          }
+          else {
+            upsample_luma(ctx, xP, yP, predSamplesL[l],nCS,
+                    (const uint8_t*)refPic->get_il_refPic()->get_image_plane(0),
+                    refPic->get_il_refPic()->get_luma_stride(),
+                    refPic->get_il_refPic()->get_width(), 
+                    refPic->get_il_refPic()->get_height(),
+                    refPic->get_il_refPic()->get_bit_depth(0),
+                    nPbW,nPbH, bit_depth_L, 
+                    refPic->get_upsampling_parameters(false));
+          }
 
-        mc_chroma(ctx, img, vi->lum.mv[l].x, vi->lum.mv[l].y, xP,yP,
-                  predSamplesC[0][l],nCS, refPic->get_image_plane(1),
-                  refPic->get_chroma_stride(), nPbW/2,nPbH/2);
-        mc_chroma(ctx, img, vi->lum.mv[l].x, vi->lum.mv[l].y, xP,yP,
-                  predSamplesC[1][l],nCS, refPic->get_image_plane(2),
-                  refPic->get_chroma_stride(), nPbW/2,nPbH/2);
+          // Upsample chroma
+          if (img->high_bit_depth(1)) {
+            upsample_chroma(ctx, xP, yP, predSamplesC[0][l],nCS,
+                    (const uint16_t*)refPic->get_il_refPic()->get_image_plane(1),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C,
+                    refPic->get_upsampling_parameters(true));
+            upsample_chroma(ctx, xP, yP, predSamplesC[1][l],nCS,
+                    (const uint16_t*)refPic->get_il_refPic()->get_image_plane(2),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C,
+                    refPic->get_upsampling_parameters(true));
+          }
+          else {
+            upsample_chroma(ctx, xP, yP, predSamplesC[0][l],nCS,
+                    (const uint8_t*)refPic->get_il_refPic()->get_image_plane(1),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C, 
+                    refPic->get_upsampling_parameters(true));
+            upsample_chroma(ctx, xP, yP, predSamplesC[1][l],nCS,
+                    (const uint8_t*)refPic->get_il_refPic()->get_image_plane(2),
+                    refPic->get_il_refPic()->get_chroma_stride(),
+                    refPic->get_il_refPic()->get_width(1), 
+                    refPic->get_il_refPic()->get_height(1),
+                    refPic->get_il_refPic()->get_bit_depth(1),
+                    nPbW/2,nPbH/2, bit_depth_C, 
+                    refPic->get_upsampling_parameters(true));
+          }
+        }
+        else {
+          // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
+
+          if (img->high_bit_depth(0)) {
+            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesL[l],nCS,
+                    (const uint16_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+          else {
+            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesL[l],nCS,
+                    (const uint8_t*)refPic->get_image_plane(0),
+                    refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
+          }
+
+          if (img->high_bit_depth(1)) {
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+          }
+          else {
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                      predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+          }
+        }
       }
     }
   }
@@ -357,23 +644,23 @@ void generate_inter_prediction_samples(decoder_context* ctx,
 
   // weighted sample prediction  (8.5.3.2.3)
 
-  //const int shift1 = 6; // TODO
-  //const int offset1= 1<<(shift1-1);
+  const int shift1_L = 14-img->sps.BitDepth_Y;
+  const int offset_shift1_L = img->sps.BitDepth_Y-8;
+  const int shift1_C = 14-img->sps.BitDepth_C;
+  const int offset_shift1_C = img->sps.BitDepth_C-8;
 
   logtrace(LogMotion,"predFlags (modified): %d %d\n", predFlag[0], predFlag[1]);
 
   if (shdr->slice_type == SLICE_TYPE_P) {
     if (img->pps.weighted_pred_flag==0) {
       if (predFlag[0]==1 && predFlag[1]==0) {
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(0,xP,yP),
-                                                img->get_image_stride(0),
-                                                predSamplesL[0],nCS, nPbW,nPbH);
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(1,xP/2,yP/2),
-                                                img->get_image_stride(1),
-                                                predSamplesC[0][0],nCS, nPbW/2,nPbH/2);
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(2,xP/2,yP/2),
-                                                img->get_image_stride(2),
-                                                predSamplesC[1][0],nCS, nPbW/2,nPbH/2);
+        ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
+                                              predSamplesL[0],nCS, nPbW,nPbH, bit_depth_L);
+        ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
+                                              predSamplesC[0][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
+        ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
+                                              predSamplesC[1][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
+        
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);
@@ -385,33 +672,30 @@ void generate_inter_prediction_samples(decoder_context* ctx,
 
       if (predFlag[0]==1 && predFlag[1]==0) {
 
-        int refIdx0 = vi->lum.refIdx[0];
+        int refIdx0 = vi->refIdx[0];
 
-        int luma_log2WD   = shdr->luma_log2_weight_denom + (14-8); // TODO: bitDepth
-        int chroma_log2WD = shdr->ChromaLog2WeightDenom + (14-8); // TODO: bitDepth
+        int luma_log2WD   = shdr->luma_log2_weight_denom + shift1_L;
+        int chroma_log2WD = shdr->ChromaLog2WeightDenom  + shift1_C;
 
         int luma_w0 = shdr->LumaWeight[0][refIdx0];
-        int luma_o0 = shdr->luma_offset[0][refIdx0] * (1<<(8-8)); // TODO: bitDepth
+        int luma_o0 = shdr->luma_offset[0][refIdx0] * (1<<(offset_shift1_L));
 
         int chroma0_w0 = shdr->ChromaWeight[0][refIdx0][0];
-        int chroma0_o0 = shdr->ChromaOffset[0][refIdx0][0] * (1<<(8-8)); // TODO: bitDepth
+        int chroma0_o0 = shdr->ChromaOffset[0][refIdx0][0] * (1<<(offset_shift1_C));
         int chroma1_w0 = shdr->ChromaWeight[0][refIdx0][1];
-        int chroma1_o0 = shdr->ChromaOffset[0][refIdx0][1] * (1<<(8-8)); // TODO: bitDepth
+        int chroma1_o0 = shdr->ChromaOffset[0][refIdx0][1] * (1<<(offset_shift1_C));
 
         logtrace(LogMotion,"weighted-0 [%d] %d %d %d  %dx%d\n", refIdx0, luma_log2WD-6,luma_w0,luma_o0,nPbW,nPbH);
 
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(0,xP,yP),
-                                              img->get_image_stride(0),
-                                              predSamplesL[0],nCS, nPbW,nPbH,
-                                              luma_w0, luma_o0, luma_log2WD);
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(1,xP/2,yP/2),
-                                              img->get_image_stride(1),
-                                              predSamplesC[0][0],nCS, nPbW/2,nPbH/2,
-                                              chroma0_w0, chroma0_o0, chroma_log2WD);
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(2,xP/2,yP/2),
-                                              img->get_image_stride(2),
-                                              predSamplesC[1][0],nCS, nPbW/2,nPbH/2,
-                                              chroma1_w0, chroma1_o0, chroma_log2WD);
+        ctx->acceleration.put_weighted_pred(pixels[0], stride[0],
+                                            predSamplesL[0],nCS, nPbW,nPbH,
+                                            luma_w0, luma_o0, luma_log2WD, bit_depth_L);
+        ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
+                                            predSamplesC[0][0],nCS, nPbW/2,nPbH/2,
+                                            chroma0_w0, chroma0_o0, chroma_log2WD, bit_depth_C);
+        ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
+                                            predSamplesC[1][0],nCS, nPbW/2,nPbH/2,
+                                            chroma1_w0, chroma1_o0, chroma_log2WD, bit_depth_C);
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);
@@ -429,120 +713,108 @@ void generate_inter_prediction_samples(decoder_context* ctx,
 
         int16_t* in0 = predSamplesL[0];
         int16_t* in1 = predSamplesL[1];
-        uint8_t* out = img->get_image_plane_at_pos(0, xP,yP);
 
-        ctx->acceleration.put_weighted_pred_avg_8(out, img->get_luma_stride(),
-                                              in0,in1, nCS, nPbW, nPbH);
+        ctx->acceleration.put_weighted_pred_avg(pixels[0], stride[0],
+                                                in0,in1, nCS, nPbW, nPbH, bit_depth_L);
 
         int16_t* in00 = predSamplesC[0][0];
         int16_t* in01 = predSamplesC[0][1];
         int16_t* in10 = predSamplesC[1][0];
         int16_t* in11 = predSamplesC[1][1];
-        uint8_t* out0 = img->get_image_plane_at_pos(1,xP/2,yP/2);
-        uint8_t* out1 = img->get_image_plane_at_pos(2,xP/2,yP/2);
 
-        ctx->acceleration.put_weighted_pred_avg_8(out0, img->get_chroma_stride(),
-                                              in00,in01, nCS, nPbW/2, nPbH/2);
-        ctx->acceleration.put_weighted_pred_avg_8(out1, img->get_chroma_stride(),
-                                              in10,in11, nCS, nPbW/2, nPbH/2);
+        ctx->acceleration.put_weighted_pred_avg(pixels[1], stride[1],
+                                                in00,in01, nCS, nPbW/2, nPbH/2, bit_depth_C);
+        ctx->acceleration.put_weighted_pred_avg(pixels[2], stride[2],
+                                                in10,in11, nCS, nPbW/2, nPbH/2, bit_depth_C);
       }
       else {
         // weighted prediction
 
-        int refIdx0 = vi->lum.refIdx[0];
-        int refIdx1 = vi->lum.refIdx[1];
+        int refIdx0 = vi->refIdx[0];
+        int refIdx1 = vi->refIdx[1];
 
-        int luma_log2WD   = shdr->luma_log2_weight_denom + (14-8); // TODO: bitDepth
-        int chroma_log2WD = shdr->ChromaLog2WeightDenom + (14-8); // TODO: bitDepth
+        int luma_log2WD   = shdr->luma_log2_weight_denom + shift1_L;
+        int chroma_log2WD = shdr->ChromaLog2WeightDenom + shift1_C;
 
         int luma_w0 = shdr->LumaWeight[0][refIdx0];
-        int luma_o0 = shdr->luma_offset[0][refIdx0] * (1<<(8-8)); // TODO: bitDepth
+        int luma_o0 = shdr->luma_offset[0][refIdx0] * (1<<(offset_shift1_L));
         int luma_w1 = shdr->LumaWeight[1][refIdx1];
-        int luma_o1 = shdr->luma_offset[1][refIdx1] * (1<<(8-8)); // TODO: bitDepth
+        int luma_o1 = shdr->luma_offset[1][refIdx1] * (1<<(offset_shift1_L));
 
         int chroma0_w0 = shdr->ChromaWeight[0][refIdx0][0];
-        int chroma0_o0 = shdr->ChromaOffset[0][refIdx0][0] * (1<<(8-8)); // TODO: bitDepth
+        int chroma0_o0 = shdr->ChromaOffset[0][refIdx0][0] * (1<<(offset_shift1_C));
         int chroma1_w0 = shdr->ChromaWeight[0][refIdx0][1];
-        int chroma1_o0 = shdr->ChromaOffset[0][refIdx0][1] * (1<<(8-8)); // TODO: bitDepth
+        int chroma1_o0 = shdr->ChromaOffset[0][refIdx0][1] * (1<<(offset_shift1_C));
         int chroma0_w1 = shdr->ChromaWeight[1][refIdx1][0];
-        int chroma0_o1 = shdr->ChromaOffset[1][refIdx1][0] * (1<<(8-8)); // TODO: bitDepth
+        int chroma0_o1 = shdr->ChromaOffset[1][refIdx1][0] * (1<<(offset_shift1_C));
         int chroma1_w1 = shdr->ChromaWeight[1][refIdx1][1];
-        int chroma1_o1 = shdr->ChromaOffset[1][refIdx1][1] * (1<<(8-8)); // TODO: bitDepth
+        int chroma1_o1 = shdr->ChromaOffset[1][refIdx1][1] * (1<<(offset_shift1_C));
 
         logtrace(LogMotion,"weighted-BI-0 [%d] %d %d %d  %dx%d\n", refIdx0, luma_log2WD-6,luma_w0,luma_o0,nPbW,nPbH);
         logtrace(LogMotion,"weighted-BI-1 [%d] %d %d %d  %dx%d\n", refIdx1, luma_log2WD-6,luma_w1,luma_o1,nPbW,nPbH);
 
         int16_t* in0 = predSamplesL[0];
         int16_t* in1 = predSamplesL[1];
-        uint8_t* out = img->get_image_plane_at_pos(0, xP,yP);
 
-        ctx->acceleration.put_weighted_bipred_8(out, img->get_luma_stride(),
-                                            in0,in1, nCS, nPbW, nPbH,
-                                            luma_w0,luma_o0,
-                                            luma_w1,luma_o1,
-                                            luma_log2WD);
+        ctx->acceleration.put_weighted_bipred(pixels[0], stride[0],
+                                              in0,in1, nCS, nPbW, nPbH,
+                                              luma_w0,luma_o0,
+                                              luma_w1,luma_o1,
+                                              luma_log2WD, bit_depth_L);
 
         int16_t* in00 = predSamplesC[0][0];
         int16_t* in01 = predSamplesC[0][1];
         int16_t* in10 = predSamplesC[1][0];
         int16_t* in11 = predSamplesC[1][1];
-        uint8_t* out0 = img->get_image_plane_at_pos(1,xP/2,yP/2);
-        uint8_t* out1 = img->get_image_plane_at_pos(2,xP/2,yP/2);
 
-        ctx->acceleration.put_weighted_bipred_8(out0, img->get_chroma_stride(),
-                                            in00,in01, nCS, nPbW/2, nPbH/2,
-                                            chroma0_w0,chroma0_o0,
-                                            chroma0_w1,chroma0_o1,
-                                            chroma_log2WD);
-        ctx->acceleration.put_weighted_bipred_8(out1, img->get_chroma_stride(),
-                                            in10,in11, nCS, nPbW/2, nPbH/2,
-                                            chroma1_w0,chroma1_o0,
-                                            chroma1_w1,chroma1_o1,
-                                            chroma_log2WD);
+        ctx->acceleration.put_weighted_bipred(pixels[1], stride[1],
+                                              in00,in01, nCS, nPbW/2, nPbH/2,
+                                              chroma0_w0,chroma0_o0,
+                                              chroma0_w1,chroma0_o1,
+                                              chroma_log2WD, bit_depth_C);
+        ctx->acceleration.put_weighted_bipred(pixels[2], stride[2],
+                                              in10,in11, nCS, nPbW/2, nPbH/2,
+                                              chroma1_w0,chroma1_o0,
+                                              chroma1_w1,chroma1_o1,
+                                              chroma_log2WD, bit_depth_C);
       }
     }
     else if (predFlag[0]==1 || predFlag[1]==1) {
       int l = predFlag[0] ? 0 : 1;
 
       if (img->pps.weighted_bipred_flag==0) {
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(0,xP,yP),
-                                                img->get_image_stride(0),
-                                                predSamplesL[l],nCS, nPbW,nPbH);
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(1,xP/2,yP/2),
-                                                img->get_image_stride(1),
-                                                predSamplesC[0][l],nCS, nPbW/2,nPbH/2);
-        ctx->acceleration.put_unweighted_pred_8(img->get_image_plane_at_pos(2,xP/2,yP/2),
-                                                img->get_image_stride(2),
-                                                predSamplesC[1][l],nCS, nPbW/2,nPbH/2);
+        ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
+                                              predSamplesL[l],nCS, nPbW,nPbH, bit_depth_L);
+        ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
+                                              predSamplesC[0][l],nCS, nPbW/2,nPbH/2, bit_depth_C);
+        ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
+                                              predSamplesC[1][l],nCS, nPbW/2,nPbH/2, bit_depth_C);
       }
       else {
-        int refIdx = vi->lum.refIdx[l];
+        int refIdx = vi->refIdx[l];
 
-        int luma_log2WD   = shdr->luma_log2_weight_denom + (14-8); // TODO: bitDepth
-        int chroma_log2WD = shdr->ChromaLog2WeightDenom + (14-8); // TODO: bitDepth
+        int luma_log2WD   = shdr->luma_log2_weight_denom + shift1_L;
+        int chroma_log2WD = shdr->ChromaLog2WeightDenom  + shift1_C;
 
         int luma_w = shdr->LumaWeight[l][refIdx];
-        int luma_o = shdr->luma_offset[l][refIdx] * (1<<(8-8)); // TODO: bitDepth
+        int luma_o = shdr->luma_offset[l][refIdx] * (1<<(offset_shift1_L));
 
         int chroma0_w = shdr->ChromaWeight[l][refIdx][0];
-        int chroma0_o = shdr->ChromaOffset[l][refIdx][0] * (1<<(8-8)); // TODO: bitDepth
+        int chroma0_o = shdr->ChromaOffset[l][refIdx][0] * (1<<(offset_shift1_C));
         int chroma1_w = shdr->ChromaWeight[l][refIdx][1];
-        int chroma1_o = shdr->ChromaOffset[l][refIdx][1] * (1<<(8-8)); // TODO: bitDepth
+        int chroma1_o = shdr->ChromaOffset[l][refIdx][1] * (1<<(offset_shift1_C));
 
         logtrace(LogMotion,"weighted-B-L%d [%d] %d %d %d  %dx%d\n", l, refIdx, luma_log2WD-6,luma_w,luma_o,nPbW,nPbH);
 
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(0,xP,yP),
-                                              img->get_image_stride(0),
-                                              predSamplesL[l],nCS, nPbW,nPbH,
-                                              luma_w, luma_o, luma_log2WD);
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(1,xP/2,yP/2),
-                                              img->get_image_stride(1),
-                                              predSamplesC[0][l],nCS, nPbW/2,nPbH/2,
-                                              chroma0_w, chroma0_o, chroma_log2WD);
-        ctx->acceleration.put_weighted_pred_8(img->get_image_plane_at_pos(2,xP/2,yP/2),
-                                              img->get_image_stride(2),
-                                              predSamplesC[1][l],nCS, nPbW/2,nPbH/2,
-                                              chroma1_w, chroma1_o, chroma_log2WD);
+        ctx->acceleration.put_weighted_pred(pixels[0], stride[0],
+                                            predSamplesL[l],nCS, nPbW,nPbH,
+                                            luma_w, luma_o, luma_log2WD, bit_depth_L);
+        ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
+                                            predSamplesC[0][l],nCS, nPbW/2,nPbH/2,
+                                            chroma0_w, chroma0_o, chroma_log2WD, bit_depth_C);
+        ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
+                                            predSamplesC[1][l],nCS, nPbW/2,nPbH/2,
+                                            chroma1_w, chroma1_o, chroma_log2WD, bit_depth_C);
       }
     }
     else {
@@ -561,7 +833,7 @@ void generate_inter_prediction_samples(decoder_context* ctx,
     logtrace(LogTransform,"MC-y-%d-%d ",xP,yP+y);
 
     for (int x=0;x<nPbW;x++) {
-      logtrace(LogTransform,"*%02x ", img->y[xP+x+(yP+y)*img->stride]);
+      logtrace(LogTransform,"*%02x ", pixels[0][x+y*stride[0]]);
     }
 
     logtrace(LogTransform,"*\n");
@@ -574,7 +846,7 @@ void generate_inter_prediction_samples(decoder_context* ctx,
     logtrace(LogTransform,"MC-cb-%d-%d ",xP/2,yP/2+y);
 
     for (int x=0;x<nPbW/2;x++) {
-      logtrace(LogTransform,"*%02x ", img->cb[xP/2+x+(yP/2+y)*img->chroma_stride]);
+      logtrace(LogTransform,"*%02x ", pixels[1][x+y*stride[1]]);
     }
 
     logtrace(LogTransform,"*\n");
@@ -587,7 +859,7 @@ void generate_inter_prediction_samples(decoder_context* ctx,
     logtrace(LogTransform,"MC-cr-%d-%d ",xP/2,yP/2+y);
 
     for (int x=0;x<nPbW/2;x++) {
-      logtrace(LogTransform,"*%02x ", img->cr[xP/2+x+(yP/2+y)*img->chroma_stride]);
+      logtrace(LogTransform,"*%02x ", pixels[2][x+y*stride[2]]);
     }
 
     logtrace(LogTransform,"*\n");
@@ -597,7 +869,7 @@ void generate_inter_prediction_samples(decoder_context* ctx,
 
 
 #ifdef DE265_LOG_TRACE
-void logmvcand(PredVectorInfo p)
+void logmvcand(const MotionVectorSpec p)
 {
   for (int v=0;v<2;v++) {
     if (p.predFlag[v]) {
@@ -613,7 +885,7 @@ void logmvcand(PredVectorInfo p)
 #endif
 
 
-LIBDE265_INLINE static bool equal_cand_MV(const PredVectorInfo* a, const PredVectorInfo* b)
+LIBDE265_INLINE static bool equal_cand_MV(const MotionVectorSpec* a, const MotionVectorSpec* b)
 {
   // TODO: is this really correct? no check for predFlag? Standard says so... (p.127)
 
@@ -639,7 +911,7 @@ LIBDE265_INLINE static bool equal_cand_MV(const PredVectorInfo* a, const PredVec
      |                   |
      |                   |
      |                   |
-     |                   |
+     |        PB         |
      |                   |
      |                   |
   +--+                   |
@@ -652,25 +924,52 @@ LIBDE265_INLINE static bool equal_cand_MV(const PredVectorInfo* a, const PredVec
 
 // 8.5.3.1.2
 // TODO: check: can we fill the candidate list directly in this function and omit to copy later
-int derive_spatial_merging_candidates(const thread_context* tctx,
+/*
+  xC/yC:  CB position
+  nCS:    CB size                 (probably modified because of singleMCLFlag)
+  xP/yP:  PB position (absolute)  (probably modified because of singleMCLFlag)
+  singleMCLFlag
+  nPbW/nPbH: PB size
+  partIdx
+  out_cand: merging candidate vectors
+
+  Add these candidates:
+  - A1
+  - B1  (if != A1)
+  - B0  (if != B1)
+  - A0  (if != A1)
+  - B2  (if != A1 and != B1)
+
+  A maximum of 4 candidates are generated.
+
+  Note 1: For a CB splitted into two PBs, it does not make sense to merge the
+  second part to the parameters of the first part, since then, we could use 2Nx2N
+  right away. -> Exclude this candidate.
+*/
+int derive_spatial_merging_candidates(const de265_image* img,
                                       int xC, int yC, int nCS, int xP, int yP,
                                       uint8_t singleMCLFlag,
                                       int nPbW, int nPbH,
                                       int partIdx,
-                                      PredVectorInfo* out_cand,
+                                      MotionVectorSpec* out_cand,
                                       int maxCandidates)
 {
-  const de265_image* img = tctx->img;
-
   const pic_parameter_set* pps = &img->pps;
-  int log2_parallel_merge_level = pps->log2_parallel_merge_level;
+  const int log2_parallel_merge_level = pps->log2_parallel_merge_level;
 
   enum PartMode PartMode = img->get_PartMode(xC,yC);
 
+  /*
+  const int A0 = SpatialMergingCandidates::PRED_A0;
+  const int A1 = SpatialMergingCandidates::PRED_A1;
+  const int B0 = SpatialMergingCandidates::PRED_B0;
+  const int B1 = SpatialMergingCandidates::PRED_B1;
+  const int B2 = SpatialMergingCandidates::PRED_B2;
+  */
 
   // --- A1 ---
 
-  // a pixel within A1
+  // a pixel within A1 (bottom right of A1)
   int xA1 = xP-1;
   int yA1 = yP+nPbH-1;
 
@@ -679,12 +978,14 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
 
   int computed_candidates = 0;
 
+  // check if candidate is in same motion-estimation region (MER) -> discard
   if ((xP>>log2_parallel_merge_level) == (xA1>>log2_parallel_merge_level) &&
       (yP>>log2_parallel_merge_level) == (yA1>>log2_parallel_merge_level)) {
     availableA1 = false;
     logtrace(LogMotion,"spatial merging candidate A1: below parallel merge level\n");
   }
-  else if (!singleMCLFlag &&
+  // redundant candidate? (Note 1) -> discard
+  else if (// !singleMCLFlag &&    automatically true when partIdx==1
            partIdx==1 &&
            (PartMode==PART_Nx2N ||
             PartMode==PART_nLx2N ||
@@ -692,6 +993,7 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
     availableA1 = false;
     logtrace(LogMotion,"spatial merging candidate A1: second part ignore\n");
   }
+  // MV available in A1
   else {
     availableA1 = img->available_pred_blk(xC,yC, nCS, xP,yP, nPbW,nPbH,partIdx, xA1,yA1);
     if (!availableA1) logtrace(LogMotion,"spatial merging candidate A1: unavailable\n");
@@ -699,7 +1001,7 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
 
   if (availableA1) {
     idxA1 = computed_candidates++;
-    out_cand[idxA1] = *img->get_mv_info(xA1,yA1);
+    out_cand[idxA1] = img->get_mv_info(xA1,yA1);
 
     logtrace(LogMotion,"spatial merging candidate A1:\n");
     logmvcand(out_cand[idxA1]);
@@ -716,12 +1018,14 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   bool availableB1;
   int idxB1;
 
+  // same MER -> discard
   if ((xP>>log2_parallel_merge_level) == (xB1>>log2_parallel_merge_level) &&
       (yP>>log2_parallel_merge_level) == (yB1>>log2_parallel_merge_level)) {
     availableB1 = false;
     logtrace(LogMotion,"spatial merging candidate B1: below parallel merge level\n");
   }
-  else if (!singleMCLFlag &&
+  // redundant candidate (Note 1) -> discard
+  else if (// !singleMCLFlag &&    automatically true when partIdx==1
            partIdx==1 &&
            (PartMode==PART_2NxN ||
             PartMode==PART_2NxnU ||
@@ -729,22 +1033,24 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
     availableB1 = false;
     logtrace(LogMotion,"spatial merging candidate B1: second part ignore\n");
   }
+  // MV available in B1
   else {
     availableB1 = img->available_pred_blk(xC,yC, nCS, xP,yP, nPbW,nPbH,partIdx, xB1,yB1);
     if (!availableB1) logtrace(LogMotion,"spatial merging candidate B1: unavailable\n");
   }
 
   if (availableB1) {
-    const PredVectorInfo* b1 = img->get_mv_info(xB1,yB1);
+    const MotionVectorSpec b1 = img->get_mv_info(xB1,yB1);
 
+    // B1 == A1 -> discard B1
     if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], b1)) {
+        equal_cand_MV(&out_cand[idxA1], &b1)) {
       idxB1 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B1: redundant to A1\n");
     }
     else {
       idxB1 = computed_candidates++;
-      out_cand[idxB1] = *b1;
+      out_cand[idxB1] = b1;
 
       logtrace(LogMotion,"spatial merging candidate B1:\n");
       logmvcand(out_cand[idxB1]);
@@ -760,7 +1066,7 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   int yB0 = yP-1;
 
   bool availableB0;
-  int  idxB0;
+  int idxB0;
 
   if ((xP>>log2_parallel_merge_level) == (xB0>>log2_parallel_merge_level) &&
       (yP>>log2_parallel_merge_level) == (yB0>>log2_parallel_merge_level)) {
@@ -773,16 +1079,17 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   }
 
   if (availableB0) {
-    const PredVectorInfo* b0 = img->get_mv_info(xB0,yB0);
+    const MotionVectorSpec b0 = img->get_mv_info(xB0,yB0);
 
+    // B0 == B1 -> discard B0
     if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], b0)) {
+        equal_cand_MV(&out_cand[idxB1], &b0)) {
       idxB0 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B0: redundant to B1\n");
     }
     else {
       idxB0 = computed_candidates++;
-      out_cand[idxB0] = *b0;
+      out_cand[idxB0] = b0;
       logtrace(LogMotion,"spatial merging candidate B0:\n");
       logmvcand(out_cand[idxB0]);
     }
@@ -797,7 +1104,7 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   int yA0 = yP+nPbH;
 
   bool availableA0;
-  int  idxA0;
+  int idxA0;
 
   if ((xP>>log2_parallel_merge_level) == (xA0>>log2_parallel_merge_level) &&
       (yP>>log2_parallel_merge_level) == (yA0>>log2_parallel_merge_level)) {
@@ -810,16 +1117,17 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   }
 
   if (availableA0) {
-    const PredVectorInfo* a0 = img->get_mv_info(xA0,yA0);
+    const MotionVectorSpec a0 = img->get_mv_info(xA0,yA0);
 
+    // A0 == A1 -> discard A0
     if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], a0)) {
+        equal_cand_MV(&out_cand[idxA1], &a0)) {
       idxA0 = idxA1;
       logtrace(LogMotion,"spatial merging candidate A0: redundant to A1\n");
     }
     else {
       idxA0 = computed_candidates++;
-      out_cand[idxA0] = *a0;
+      out_cand[idxA0] = a0;
       logtrace(LogMotion,"spatial merging candidate A0:\n");
       logmvcand(out_cand[idxA0]);
     }
@@ -834,8 +1142,9 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   int yB2 = yP-1;
 
   bool availableB2;
-  int  idxB2;
+  int idxB2;
 
+  // if we already have four candidates, do not consider B2 anymore
   if (computed_candidates==4) {
     availableB2 = false;
     logtrace(LogMotion,"spatial merging candidate B2: ignore\n");
@@ -851,21 +1160,23 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
   }
 
   if (availableB2) {
-    const PredVectorInfo* b2 = img->get_mv_info(xB2,yB2);
+    const MotionVectorSpec b2 = img->get_mv_info(xB2,yB2);
 
+    // B2 == B1 -> discard B2
     if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], b2)) {
+        equal_cand_MV(&out_cand[idxB1], &b2)) {
       idxB2 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to B1\n");
     }
+    // B2 == A1 -> discard B2
     else if (availableA1 &&
-             equal_cand_MV(&out_cand[idxA1], b2)) {
+             equal_cand_MV(&out_cand[idxA1], &b2)) {
       idxB2 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to A1\n");
     }
     else {
       idxB2 = computed_candidates++;
-      out_cand[idxB2] = *b2;
+      out_cand[idxB2] = b2;
       logtrace(LogMotion,"spatial merging candidate B2:\n");
       logmvcand(out_cand[idxB2]);
     }
@@ -876,13 +1187,10 @@ int derive_spatial_merging_candidates(const thread_context* tctx,
 
 
 // 8.5.3.1.4
-/* Note (TODO): during decoding, we know which of the candidates we will select.
-   Hence, we do not really have to generate the other ones...
- */
-void derive_zero_motion_vector_candidates(slice_segment_header* shdr,
-                                          PredVectorInfo* out_mergeCandList,
+void derive_zero_motion_vector_candidates(const slice_segment_header* shdr,
+                                          MotionVectorSpec* out_mergeCandList,
                                           int* inout_numCurrMergeCand,
-                                          int  maxCandidates)
+                                          int maxCandidates)
 {
   logtrace(LogMotion,"derive_zero_motion_vector_candidates\n");
 
@@ -905,17 +1213,19 @@ void derive_zero_motion_vector_candidates(slice_segment_header* shdr,
 
     logtrace(LogMotion,"zeroIdx:%d numRefIdx:%d\n", zeroIdx, numRefIdx);
 
-    PredVectorInfo* newCand = &out_mergeCandList[*inout_numCurrMergeCand];
+    MotionVectorSpec* newCand = &out_mergeCandList[*inout_numCurrMergeCand];
+
+    const int refIdx = (zeroIdx < numRefIdx) ? zeroIdx : 0;
 
     if (shdr->slice_type==SLICE_TYPE_P) {
-      newCand->refIdx[0] = (zeroIdx < numRefIdx) ? zeroIdx : 0;
+      newCand->refIdx[0] = refIdx;
       newCand->refIdx[1] = -1;
       newCand->predFlag[0] = 1;
       newCand->predFlag[1] = 0;
     }
     else {
-      newCand->refIdx[0] = (zeroIdx < numRefIdx) ? zeroIdx : 0;
-      newCand->refIdx[1] = (zeroIdx < numRefIdx) ? zeroIdx : 0;
+      newCand->refIdx[0] = refIdx;
+      newCand->refIdx[1] = refIdx;
       newCand->predFlag[0] = 1;
       newCand->predFlag[1] = 1;
     }
@@ -957,21 +1267,39 @@ bool scale_mv(MotionVector* out_mv, MotionVector mv, int colDist, int currDist)
 
 // (L1003) 8.5.3.2.8
 
-void derive_collocated_motion_vectors(decoder_context* ctx,
+void derive_collocated_motion_vectors(base_context* ctx,
                                       de265_image* img,
                                       const slice_segment_header* shdr,
                                       int xP,int yP,
                                       int colPic,
+                                      bool il_pic,
                                       int xColPb,int yColPb,
-                                      int refIdxLX, int X,
+                                      int refIdxLX,  // (always 0 for merge mode)
+                                      int X,
                                       MotionVector* out_mvLXCol,
                                       uint8_t* out_availableFlagLXCol)
 {
   logtrace(LogMotion,"derive_collocated_motion_vectors %d;%d\n",xP,yP);
 
-  assert(ctx->has_image(colPic));
-  const de265_image* colImg = ctx->get_image(colPic);
+
+  // get collocated image and the prediction mode at the collocated position
+
+  assert(ctx->has_image(colPic, il_pic));
+  const de265_image* colImg = ctx->get_image(colPic, il_pic);
+
+  // check for access outside image area
+
+  if (xColPb >= colImg->get_width() ||
+      yColPb >= colImg->get_height()) {
+    ctx->add_warning(DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA, false);
+    *out_availableFlagLXCol = 0;
+    return;
+  }
+
   enum PredMode predMode = colImg->get_pred_mode(xColPb,yColPb);
+
+
+  // collocated block is Intra -> no collocated MV
 
   if (predMode == MODE_INTRA) {
     out_mvLXCol->x = 0;
@@ -979,127 +1307,155 @@ void derive_collocated_motion_vectors(decoder_context* ctx,
     *out_availableFlagLXCol = 0;
     return;
   }
+
+
+  logtrace(LogMotion,"colPic:%d (POC=%d) X:%d refIdxLX:%d refpiclist:%d\n",
+           colPic,
+           colImg->PicOrderCntVal,
+           X,refIdxLX,shdr->RefPicList[X][refIdxLX]);
+
+
+  // collocated reference image is unavailable -> no collocated MV
+
+  if (colImg->integrity == INTEGRITY_UNAVAILABLE_REFERENCE) {
+    out_mvLXCol->x = 0;
+    out_mvLXCol->y = 0;
+    *out_availableFlagLXCol = 0;
+    return;
+  }
+
+
+  // get the collocated MV
+
+  const MotionVectorSpec mvi = colImg->get_mv_info(xColPb,yColPb);
+  int listCol;
+  int refIdxCol;
+  MotionVector mvCol;
+
+  logtrace(LogMotion,"read MVI %d;%d:\n",xColPb,yColPb);
+  logmvcand(mvi);
+
+
+  // collocated MV uses only L1 -> use L1
+  if (mvi.predFlag[0]==0) {
+    mvCol = mvi.mv[1];
+    refIdxCol = mvi.refIdx[1];
+    listCol = 1;
+  }
+  // collocated MV uses only L0 -> use L0
+  else if (mvi.predFlag[1]==0) {
+    mvCol = mvi.mv[0];
+    refIdxCol = mvi.refIdx[0];
+    listCol = 0;
+  }
+  // collocated MV uses L0 and L1
   else {
-    logtrace(LogMotion,"colPic:%d (POC=%d) X:%d refIdxLX:%d refpiclist:%d\n",
-             colPic,
-             colImg->PicOrderCntVal,
-             X,refIdxLX,shdr->RefPicList[X][refIdxLX]);
+    bool allRefFramesBeforeCurrentFrame = true;
 
-    if (colImg->integrity == INTEGRITY_UNAVAILABLE_REFERENCE) {
-      out_mvLXCol->x = 0;
-      out_mvLXCol->y = 0;
-      *out_availableFlagLXCol = 0;
-      return;
-    }
+    const int currentPOC = img->PicOrderCntVal;
 
-    const PredVectorInfo* mvi = colImg->get_mv_info(xColPb,yColPb);
-    int listCol;
-    int refIdxCol;
-    MotionVector mvCol;
+    // all reference POCs earlier than current POC (list 1)
+    // Test L1 first, because there is a higher change to find a future reference frame.
 
-    logtrace(LogMotion,"read MVI %d;%d:\n",xColPb,yColPb);
-    logmvcand(*mvi);
+    for (int rIdx=0; rIdx<shdr->num_ref_idx_l1_active && allRefFramesBeforeCurrentFrame; rIdx++)
+      {
+        const de265_image* refimg = ctx->get_image(shdr->RefPicList[1][rIdx], shdr->InterLayerRefPic[1][rIdx]);
+        int refPOC = refimg->PicOrderCntVal;
 
-    if (mvi->predFlag[0]==0) {
-      mvCol = mvi->mv[1];
-      refIdxCol = mvi->refIdx[1];
-      listCol = 1;
+        if (refPOC > currentPOC) {
+          allRefFramesBeforeCurrentFrame = false;
+        }
+      }
+
+    // all reference POCs earlier than current POC (list 0)
+
+    for (int rIdx=0; rIdx<shdr->num_ref_idx_l0_active && allRefFramesBeforeCurrentFrame; rIdx++)
+      {
+        const de265_image* refimg = ctx->get_image(shdr->RefPicList[0][rIdx], shdr->InterLayerRefPic[0][rIdx]);
+        int refPOC = refimg->PicOrderCntVal;
+
+        if (refPOC > currentPOC) {
+          allRefFramesBeforeCurrentFrame = false;
+        }
+      }
+
+
+    /* TODO: What is the rationale behind this ???
+
+       My guess:
+       when there are images before the current frame (most probably in L0) and images after
+       the current frame (most probably in L1), we take the reference in the opposite
+       direction than where the collocated frame is positioned in the hope that the distance
+       to the current frame will be smaller and thus give a better prediction.
+
+       If all references point into the past, we cannot say much about the temporal order or
+       L0,L1 and thus take over both parts.
+     */
+
+    if (allRefFramesBeforeCurrentFrame) {
+      mvCol = mvi.mv[X];
+      refIdxCol = mvi.refIdx[X];
+      listCol = X;
     }
     else {
-      if (mvi->predFlag[1]==0) {
-        mvCol = mvi->mv[0];
-        refIdxCol = mvi->refIdx[0];
-        listCol = 0;
-      }
-      else {
-        int AllDiffPicOrderCntLEZero = true;
-
-        const int PicOrderCntVal = img->PicOrderCntVal;
-
-        for (int rIdx=0; rIdx<shdr->num_ref_idx_l0_active && AllDiffPicOrderCntLEZero; rIdx++)
-          {
-            const de265_image* imgA = ctx->get_image(shdr->RefPicList[0][rIdx]);
-            int aPOC = imgA->PicOrderCntVal;
-
-            if (aPOC > PicOrderCntVal) {
-              AllDiffPicOrderCntLEZero = false;
-            }
-          }
-
-        for (int rIdx=0; rIdx<shdr->num_ref_idx_l1_active && AllDiffPicOrderCntLEZero; rIdx++)
-          {
-            const de265_image* imgA = ctx->get_image(shdr->RefPicList[1][rIdx]);
-            int aPOC = imgA->PicOrderCntVal;
-
-            if (aPOC > PicOrderCntVal) {
-              AllDiffPicOrderCntLEZero = false;
-            }
-          }
-
-        if (AllDiffPicOrderCntLEZero) {
-          mvCol = mvi->mv[X];
-          refIdxCol = mvi->refIdx[X];
-          listCol = X;
-        }
-        else {
-          int N = shdr->collocated_from_l0_flag;
-          mvCol = mvi->mv[N];
-          refIdxCol = mvi->refIdx[N];
-          listCol = N;
-        }
-      }
+      int N = shdr->collocated_from_l0_flag;
+      mvCol = mvi.mv[N];
+      refIdxCol = mvi.refIdx[N];
+      listCol = N;
     }
+  }
 
 
 
-    const slice_segment_header* colShdr = colImg->slices[ colImg->get_SliceHeaderIndex(xColPb,yColPb) ];
+  const slice_segment_header* colShdr = colImg->slices[ colImg->get_SliceHeaderIndex(xColPb,yColPb) ];
 
-    if (shdr->LongTermRefPic[X][refIdxLX] !=
-        colShdr->LongTermRefPic[listCol][refIdxCol]) {
-      *out_availableFlagLXCol = 0;
-      out_mvLXCol->x = 0;
-      out_mvLXCol->y = 0;
+  if (shdr->LongTermRefPic[X][refIdxLX] !=
+      colShdr->LongTermRefPic[listCol][refIdxCol]) {
+    *out_availableFlagLXCol = 0;
+    out_mvLXCol->x = 0;
+    out_mvLXCol->y = 0;
+  }
+  else {
+    *out_availableFlagLXCol = 1;
+
+    const bool isLongTerm = shdr->LongTermRefPic[X][refIdxLX];
+
+    int colDist  = colImg->PicOrderCntVal - colShdr->RefPicList_POC[listCol][refIdxCol];
+    int currDist = img->PicOrderCntVal - shdr->RefPicList_POC[X][refIdxLX];
+
+    logtrace(LogMotion,"COLPOCDIFF %d %d [%d %d / %d %d]\n",colDist, currDist,
+             colImg->PicOrderCntVal, colShdr->RefPicList_POC[listCol][refIdxCol],
+             img->PicOrderCntVal, shdr->RefPicList_POC[X][refIdxLX]
+             );
+
+    if (isLongTerm || colDist == currDist) {
+      *out_mvLXCol = mvCol;
     }
     else {
-      *out_availableFlagLXCol = 1;
-
-      const bool isLongTerm = shdr->LongTermRefPic[X][refIdxLX];
-
-      int colDist  = colImg->PicOrderCntVal - colShdr->RefPicList_POC[listCol][refIdxCol];
-      int currDist = img->PicOrderCntVal - shdr->RefPicList_POC[X][refIdxLX];
-
-      logtrace(LogMotion,"COLPOCDIFF %d %d [%d %d / %d %d]\n",colDist, currDist,
-               colImg->PicOrderCntVal, colShdr->RefPicList_POC[listCol][refIdxCol],
-               img->PicOrderCntVal, shdr->RefPicList_POC[X][refIdxLX]
-               );
-
-      if (isLongTerm || colDist == currDist) {
-        *out_mvLXCol = mvCol;
+      if (!scale_mv(out_mvLXCol, mvCol, colDist, currDist)) {
+        ctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
+        img->integrity = INTEGRITY_DECODING_ERRORS;
       }
-      else {
-        if (!scale_mv(out_mvLXCol, mvCol, colDist, currDist)) {
-          ctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
-          img->integrity = INTEGRITY_DECODING_ERRORS;
-        }
 
-        logtrace(LogMotion,"scale: %d;%d to %d;%d\n",
-                 mvCol.x,mvCol.y, out_mvLXCol->x,out_mvLXCol->y);
-      }
+      logtrace(LogMotion,"scale: %d;%d to %d;%d\n",
+               mvCol.x,mvCol.y, out_mvLXCol->x,out_mvLXCol->y);
     }
   }
 }
 
 
 // 8.5.3.1.7
-void derive_temporal_luma_vector_prediction(decoder_context* ctx,
+void derive_temporal_luma_vector_prediction(base_context* ctx,
                                             de265_image* img,
                                             const slice_segment_header* shdr,
                                             int xP,int yP,
                                             int nPbW,int nPbH,
-                                            int refIdxL, int X,
+                                            int refIdxL,
+                                            int X, // which MV (L0/L1) to get
                                             MotionVector* out_mvLXCol,
                                             uint8_t*      out_availableFlagLXCol)
 {
+  // --- no temporal MVP -> exit ---
 
   if (shdr->slice_temporal_mvp_enabled_flag == 0) {
     out_mvLXCol->x = 0;
@@ -1108,30 +1464,34 @@ void derive_temporal_luma_vector_prediction(decoder_context* ctx,
     return;
   }
 
+
+  // --- find collocated reference image ---
+
   int Log2CtbSizeY = img->sps.Log2CtbSizeY;
 
   int colPic; // TODO: this is the same for the whole slice. We can precompute it.
+  bool colPic_il; // Is this an inter layer picture?
 
   if (shdr->slice_type == SLICE_TYPE_B &&
       shdr->collocated_from_l0_flag == 0)
     {
       logtrace(LogMotion,"collocated L1 ref_idx=%d\n",shdr->collocated_ref_idx);
 
-      // TODO: make sure that shdr->collocated_ref_idx is a valid index
       colPic = shdr->RefPicList[1][ shdr->collocated_ref_idx ];
+      colPic_il = shdr->InterLayerRefPic[1][ shdr->collocated_ref_idx ];
     }
   else
     {
       logtrace(LogMotion,"collocated L0 ref_idx=%d\n",shdr->collocated_ref_idx);
 
-      // TODO: make sure that shdr->collocated_ref_idx is a valid index
       colPic = shdr->RefPicList[0][ shdr->collocated_ref_idx ];
+      colPic_il = shdr->InterLayerRefPic[0][ shdr->collocated_ref_idx ];
     }
 
-  //logtrace(LogMotion,"collocated reference POC=%d\n",ctx->dpb[colPic].PicOrderCntVal);
 
+  // check whether collocated reference picture exists
 
-  if (!ctx->has_image(colPic)) {
+  if (!ctx->has_image(colPic, colPic_il)) {
     out_mvLXCol->x = 0;
     out_mvLXCol->y = 0;
     *out_availableFlagLXCol = 0;
@@ -1141,10 +1501,18 @@ void derive_temporal_luma_vector_prediction(decoder_context* ctx,
   }
 
 
+  // --- get collocated MV either at bottom-right corner or from center of PB ---
+
   int xColPb,yColPb;
   int yColBr = yP + nPbH; // bottom right collocated motion vector position
   int xColBr = xP + nPbW;
 
+  /* If neighboring pixel at bottom-right corner is in the same CTB-row and inside the image,
+     use this (reduced down to 16 pixels resolution) as collocated MV position.
+
+     Note: see 2014, Sze, Sect. 5.2.1.2 why candidate C0 is excluded when on another CTB-row.
+     This is to reduce the memory bandwidth requirements.
+   */
   if ((yP>>Log2CtbSizeY) == (yColBr>>Log2CtbSizeY) &&
       xColBr < img->sps.pic_width_in_luma_samples &&
       yColBr < img->sps.pic_height_in_luma_samples)
@@ -1152,7 +1520,7 @@ void derive_temporal_luma_vector_prediction(decoder_context* ctx,
       xColPb = xColBr & ~0x0F; // reduce resolution of collocated motion-vectors to 16 pixels grid
       yColPb = yColBr & ~0x0F;
 
-      derive_collocated_motion_vectors(ctx,img,shdr, xP,yP, colPic, xColPb,yColPb, refIdxL, X,
+      derive_collocated_motion_vectors(ctx,img,shdr, xP,yP, colPic, colPic_il, xColPb,yColPb, refIdxL, X,
                                        out_mvLXCol, out_availableFlagLXCol);
     }
   else
@@ -1171,7 +1539,7 @@ void derive_temporal_luma_vector_prediction(decoder_context* ctx,
     xColPb = xColCtr & ~0x0F; // reduce resolution of collocated motion-vectors to 16 pixels grid
     yColPb = yColCtr & ~0x0F;
 
-    derive_collocated_motion_vectors(ctx,img,shdr, xP,yP, colPic, xColPb,yColPb, refIdxL, X,
+    derive_collocated_motion_vectors(ctx,img,shdr, xP,yP, colPic, colPic_il, xColPb,yColPb, refIdxL, X,
                                      out_mvLXCol, out_availableFlagLXCol);
   }
 }
@@ -1184,11 +1552,11 @@ static int table_8_19[2][12] = {
 
 // 8.5.3.1.3
 /* Note (TODO): during decoding, we know which of the candidates we will select.
-   Hence, we do not really have to generate the other ones...
- */
-void derive_combined_bipredictive_merging_candidates(const decoder_context* ctx,
-                                                     slice_segment_header* shdr,
-                                                     PredVectorInfo* inout_mergeCandList,
++   Hence, we do not really have to generate the other ones...
++ */
+void derive_combined_bipredictive_merging_candidates(const base_context* ctx,
+                                                     const slice_segment_header* shdr,
+                                                     MotionVectorSpec* inout_mergeCandList,
                                                      int* inout_numMergeCand,
                                                      int maxCandidates)
 {
@@ -1208,21 +1576,29 @@ void derive_combined_bipredictive_merging_candidates(const decoder_context* ctx,
         assert(false); // bitstream error -> TODO: conceal error
       }
 
-      PredVectorInfo* l0Cand = &inout_mergeCandList[l0CandIdx];
-      PredVectorInfo* l1Cand = &inout_mergeCandList[l1CandIdx];
+      MotionVectorSpec* l0Cand = &inout_mergeCandList[l0CandIdx];
+      MotionVectorSpec* l1Cand = &inout_mergeCandList[l1CandIdx];
 
       logtrace(LogMotion,"add bipredictive merging candidate (combIdx:%d)\n",combIdx);
       logtrace(LogMotion,"l0Cand:\n"); logmvcand(*l0Cand);
       logtrace(LogMotion,"l1Cand:\n"); logmvcand(*l1Cand);
 
-      const de265_image* img0 = l0Cand->predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand->refIdx[0]]) : NULL;
-      const de265_image* img1 = l1Cand->predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand->refIdx[1]]) : NULL;
+      const de265_image* img0 = l0Cand->predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand->refIdx[0]], shdr->InterLayerRefPic[0][l0Cand->refIdx[0]]) : NULL;
+      const de265_image* img1 = l1Cand->predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand->refIdx[1]], shdr->InterLayerRefPic[1][l1Cand->refIdx[1]]) : NULL;
+
+      if (l0Cand->predFlag[0] && !img0) {
+        return; // TODO error
+      }
+
+      if (l1Cand->predFlag[1] && !img1) {
+        return; // TODO error
+      }
 
       if (l0Cand->predFlag[0] && l1Cand->predFlag[1] &&
           (img0->PicOrderCntVal != img1->PicOrderCntVal     ||
            l0Cand->mv[0].x != l1Cand->mv[1].x ||
            l0Cand->mv[0].y != l1Cand->mv[1].y)) {
-        PredVectorInfo* p = &inout_mergeCandList[ *inout_numMergeCand ];
+        MotionVectorSpec* p = &inout_mergeCandList[ *inout_numMergeCand ];
         p->refIdx[0] = l0Cand->refIdx[0];
         p->refIdx[1] = l1Cand->refIdx[1];
         p->predFlag[0] = l0Cand->predFlag[0];
@@ -1246,21 +1622,30 @@ void derive_combined_bipredictive_merging_candidates(const decoder_context* ctx,
 
 
 // 8.5.3.1.1
-void derive_luma_motion_merge_mode(decoder_context* ctx,
-                                   thread_context* tctx,
-                                   int xC,int yC, int xP,int yP,
-                                   int nCS, int nPbW,int nPbH, int partIdx,
-                                   VectorInfo* out_vi)
+static void get_merge_candidate_list_without_step_9(base_context* ctx,
+                                                    const slice_segment_header* shdr,
+                                                    de265_image* img,
+                                                    int xC,int yC, int xP,int yP,
+                                                    int nCS, int nPbW,int nPbH, int partIdx,
+                                                    int max_merge_idx,
+                                                    MotionVectorSpec* mergeCandList)
 {
-  slice_segment_header* shdr = tctx->shdr;
 
   //int xOrigP = xP;
   //int yOrigP = yP;
   int nOrigPbW = nPbW;
   int nOrigPbH = nPbH;
 
-  int singleMCLFlag;
-  singleMCLFlag = (tctx->img->pps.log2_parallel_merge_level > 2 && nCS==8);
+  int singleMCLFlag; // single merge-candidate-list (MCL) flag
+
+  /* Use single MCL for CBs of size 8x8, except when parallel-merge-level is at 4x4.
+     Without this flag, PBs smaller than 8x8 would not receive as much merging candidates.
+     Having additional candidates might have these advantages:
+     - coding MVs for these small PBs is expensive, and
+     - since the PBs are not far away from a proper (neighboring) merging candidate,
+       the quality of the candidates will still be good.
+   */
+  singleMCLFlag = (img->pps.log2_parallel_merge_level > 2 && nCS==8);
 
   if (singleMCLFlag) {
     xP=xC;
@@ -1270,27 +1655,23 @@ void derive_luma_motion_merge_mode(decoder_context* ctx,
     partIdx=0;
   }
 
-  //int maxCandidates = tctx->shdr->MaxNumMergeCand;
-  int maxCandidates = tctx->merge_idx + 1;
-
-
-  PredVectorInfo mergeCandList[5];
+  int maxCandidates = max_merge_idx+1;
+  //MotionVectorSpec mergeCandList[5];
   int numMergeCand=0;
 
   // --- spatial merge candidates
 
-  numMergeCand = derive_spatial_merging_candidates(tctx, xC,yC, nCS, xP,yP, singleMCLFlag,
-                                                   nPbW,nPbH,partIdx, mergeCandList, maxCandidates);
-
+  numMergeCand = derive_spatial_merging_candidates(img, xC,yC, nCS, xP,yP, singleMCLFlag,
+                                                   nPbW,nPbH,partIdx, mergeCandList,
+                                                   maxCandidates);
 
   // --- collocated merge candidate
-
   if (numMergeCand < maxCandidates) {
     int refIdxCol[2] = { 0,0 };
 
     MotionVector mvCol[2];
     uint8_t predFlagLCol[2];
-    derive_temporal_luma_vector_prediction(ctx,tctx->img,shdr, xP,yP,nPbW,nPbH,
+    derive_temporal_luma_vector_prediction(ctx,img,shdr, xP,yP,nPbW,nPbH,
                                            refIdxCol[0],0, &mvCol[0],
                                            &predFlagLCol[0]);
 
@@ -1298,7 +1679,7 @@ void derive_luma_motion_merge_mode(decoder_context* ctx,
     predFlagLCol[1] = 0;
 
     if (shdr->slice_type == SLICE_TYPE_B) {
-      derive_temporal_luma_vector_prediction(ctx,tctx->img,shdr,
+      derive_temporal_luma_vector_prediction(ctx,img,shdr,
                                              xP,yP,nPbW,nPbH, refIdxCol[1],1, &mvCol[1],
                                              &predFlagLCol[1]);
       availableFlagCol |= predFlagLCol[1];
@@ -1306,7 +1687,7 @@ void derive_luma_motion_merge_mode(decoder_context* ctx,
 
 
     if (availableFlagCol) {
-      PredVectorInfo* colVec = &mergeCandList[numMergeCand++];
+      MotionVectorSpec* colVec = &mergeCandList[numMergeCand++];
 
       colVec->mv[0] = mvCol[0];
       colVec->mv[1] = mvCol[1];
@@ -1331,30 +1712,73 @@ void derive_luma_motion_merge_mode(decoder_context* ctx,
   derive_zero_motion_vector_candidates(shdr, mergeCandList, &numMergeCand, maxCandidates);
 
 
-  // 8.
-
-  int merge_idx = tctx->merge_idx;
-  out_vi->lum = mergeCandList[merge_idx];
-
-
   logtrace(LogMotion,"mergeCandList:\n");
   for (int i=0;i<shdr->MaxNumMergeCand;i++)
     {
-      logtrace(LogMotion, " %d:%s\n", i, i==merge_idx ? " SELECTED":"");
+      //logtrace(LogMotion, " %d:%s\n", i, i==merge_idx ? " SELECTED":"");
       logmvcand(mergeCandList[i]);
     }
+}
 
-  // 9.
 
-  if (out_vi->lum.predFlag[0] && out_vi->lum.predFlag[1] && nOrigPbW+nOrigPbH==12) {
-    out_vi->lum.refIdx[1] = -1;
-    out_vi->lum.predFlag[1] = 0;
+
+void get_merge_candidate_list(base_context* ctx,
+                              const slice_segment_header* shdr,
+                              de265_image* img,
+                              int xC,int yC, int xP,int yP,
+                              int nCS, int nPbW,int nPbH, int partIdx,
+                              MotionVectorSpec* mergeCandList)
+{
+  int max_merge_idx = 5-shdr->five_minus_max_num_merge_cand -1;
+
+  get_merge_candidate_list_without_step_9(ctx, shdr, img,
+                                          xC,yC,xP,yP,nCS,nPbW,nPbH, partIdx,
+                                          max_merge_idx, mergeCandList);
+
+  // 9. for encoder: modify all merge candidates
+
+  for (int i=0;i<=max_merge_idx;i++) {
+    if (mergeCandList[i].predFlag[0] &&
+        mergeCandList[i].predFlag[1] &&
+        nPbW+nPbH==12)
+      {
+        mergeCandList[i].refIdx[1]   = -1;
+        mergeCandList[i].predFlag[1] = 0;
+      }
+  }
+}
+
+
+
+void derive_luma_motion_merge_mode(base_context* ctx,
+                                   const slice_segment_header* shdr,
+                                   de265_image* img,
+                                   int xC,int yC, int xP,int yP,
+                                   int nCS, int nPbW,int nPbH, int partIdx,
+                                   int merge_idx,
+                                   MotionVectorSpec* out_vi)
+{
+  MotionVectorSpec mergeCandList[5];
+
+  get_merge_candidate_list_without_step_9(ctx, shdr, img,
+                                          xC,yC,xP,yP,nCS,nPbW,nPbH, partIdx,
+                                          merge_idx, mergeCandList);
+
+
+  *out_vi = mergeCandList[merge_idx];
+
+  // 8.5.3.1.1 / 9.
+
+  if (out_vi->predFlag[0] && out_vi->predFlag[1] && nPbW+nPbH==12) {
+    out_vi->refIdx[1] = -1;
+    out_vi->predFlag[1] = 0;
   }
 }
 
 
 // 8.5.3.1.6
-void derive_spatial_luma_vector_prediction(de265_image* img,
+void derive_spatial_luma_vector_prediction(base_context* ctx,
+                                           de265_image* img,
                                            const slice_segment_header* shdr,
                                            int xC,int yC,int nCS,int xP,int yP,
                                            int nPbW,int nPbH, int X,
@@ -1362,12 +1786,14 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
                                            uint8_t out_availableFlagLXN[2],
                                            MotionVector out_mvLXN[2])
 {
-  const decoder_context* ctx = img->decctx;
-
   int isScaledFlagLX = 0;
 
   const int A=0;
   const int B=1;
+
+  out_availableFlagLXN[A] = 0;
+  out_availableFlagLXN[B] = 0;
+
 
   // --- A ---
 
@@ -1402,9 +1828,9 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
   int refIdxA=-1;
 
   // the POC we want to reference in this PB
-  const int referenced_POC = ctx->get_image(shdr->RefPicList[X][ refIdxLX ])->PicOrderCntVal;
-
-  const int referenced_refIdx = refIdxLX;
+  const de265_image* tmpimg = ctx->get_image(shdr->RefPicList[X][refIdxLX], shdr->InterLayerRefPic[X][refIdxLX]);
+  if (tmpimg==NULL) { return; }
+  const int referenced_POC = tmpimg->PicOrderCntVal;
 
   for (int k=0;k<=1;k++) {
     if (availableA[k] &&
@@ -1413,31 +1839,32 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
 
       int Y=1-X;
 
-      const PredVectorInfo* vi = img->get_mv_info(xA[k],yA[k]);
+      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
       logtrace(LogMotion,"MVP A%d=\n",k);
       logmvcand(*vi);
 
+      const de265_image* imgX = NULL;
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
+      const de265_image* imgY = NULL;
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
+
       // check whether the predictor X is available and references the same POC
-      if (vi->predFlag[X] &&
-          ctx->get_image(shdr->RefPicList[X][ vi->refIdx[X] ])->PicOrderCntVal == referenced_POC) {
-        //vi->refIdx[X] == referenced_refIdx) {
+      if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with same POC\n",k,X);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[X];
-        refIdxA = vi->refIdx[X];
+        out_mvLXN[A] = vi.mv[X];
+        refIdxA = vi.refIdx[X];
       }
       // check whether the other predictor (Y) is available and references the same POC
-      else if (vi->predFlag[Y] &&
-               ctx->get_image(shdr->RefPicList[Y][ vi->refIdx[Y] ])->PicOrderCntVal == referenced_POC) {
-        //vi->refIdx[Y] == referenced_refIdx) {
+      else if (vi.predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with same POC\n",k,Y);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[Y];
-        refIdxA = vi->refIdx[Y];
+        out_mvLXN[A] = vi.mv[Y];
+        refIdxA = vi.refIdx[Y];
       }
     }
   }
@@ -1454,38 +1881,43 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
 
       int Y=1-X;
 
-      const PredVectorInfo* vi = img->get_mv_info(xA[k],yA[k]);
-      if (vi->predFlag[X]==1 &&
-          shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi->refIdx[X] ]) {
+      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
+      if (vi.predFlag[X]==1 &&
+          shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
 
         logtrace(LogMotion,"take A%D/L%d as A candidate with different POCs\n",k,X);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[X];
-        refIdxA = vi->refIdx[X];
+        out_mvLXN[A] = vi.mv[X];
+        refIdxA = vi.refIdx[X];
         refPicList = X;
       }
-      else if (vi->predFlag[Y]==1 &&
-               shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi->refIdx[Y] ]) {
+      else if (vi.predFlag[Y]==1 &&
+               shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi.refIdx[Y] ]) {
 
         logtrace(LogMotion,"take A%d/L%d as A candidate with different POCs\n",k,Y);
 
         out_availableFlagLXN[A]=1;
-        out_mvLXN[A] = vi->mv[Y];
-        refIdxA = vi->refIdx[Y];
+        out_mvLXN[A] = vi.mv[Y];
+        refIdxA = vi.refIdx[Y];
         refPicList = Y;
       }
     }
 
     if (out_availableFlagLXN[A]==1) {
+      if (refIdxA<0) {
+        out_availableFlagLXN[0] = out_availableFlagLXN[1] = false;
+        return; // error
+      }
+
       assert(refIdxA>=0);
       assert(refPicList>=0);
 
-      const de265_image* refPicA = ctx->get_image(shdr->RefPicList[refPicList][refIdxA ]);
-      const de265_image* refPicX = ctx->get_image(shdr->RefPicList[X         ][refIdxLX]);
+      const de265_image* refPicA = ctx->get_image(shdr->RefPicList[refPicList][refIdxA ], shdr->InterLayerRefPic[refPicList][refIdxA ]);
+      const de265_image* refPicX = ctx->get_image(shdr->RefPicList[X         ][refIdxLX], shdr->InterLayerRefPic[X         ][refIdxLX]);
 
-      int picStateA = shdr->RefPicList_PicState[refPicList][refIdxA ];
-      int picStateX = shdr->RefPicList_PicState[X         ][refIdxLX];
+      //int picStateA = shdr->RefPicList_PicState[refPicList][refIdxA ];
+      //int picStateX = shdr->RefPicList_PicState[X         ][refIdxLX];
 
       int isLongTermA = shdr->LongTermRefPic[refPicList][refIdxA ];
       int isLongTermX = shdr->LongTermRefPic[X         ][refIdxLX];
@@ -1503,7 +1935,7 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
           int distX = img->PicOrderCntVal - referenced_POC;
 
           if (!scale_mv(&out_mvLXN[A], out_mvLXN[A], distA, distX)) {
-            img->decctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
+            ctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
             img->integrity = INTEGRITY_DECODING_ERRORS;
           }
         }
@@ -1541,26 +1973,29 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
 
       int Y=1-X;
 
-      const PredVectorInfo* vi = img->get_mv_info(xB[k],yB[k]);
+      const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
       logtrace(LogMotion,"MVP B%d=\n",k);
       logmvcand(*vi);
 
 
-      if (vi->predFlag[X] &&
-          ctx->get_image(shdr->RefPicList[X][ vi->refIdx[X] ])->PicOrderCntVal == referenced_POC) {
+      const de265_image* imgX = NULL;
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
+      const de265_image* imgY = NULL;
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
+
+      if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"a) take B%d/L%d as B candidate with same POC\n",k,X);
 
         out_availableFlagLXN[B]=1;
-        out_mvLXN[B] = vi->mv[X];
-        refIdxB = vi->refIdx[X];
+        out_mvLXN[B] = vi.mv[X];
+        refIdxB = vi.refIdx[X];
       }
-      else if (vi->predFlag[Y] &&
-               ctx->get_image(shdr->RefPicList[Y][ vi->refIdx[Y] ])->PicOrderCntVal == referenced_POC) {
+      else if (vi.predFlag[Y] && imgY && imgY->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"b) take B%d/L%d as B candidate with same POC\n",k,Y);
 
         out_availableFlagLXN[B]=1;
-        out_mvLXN[B] = vi->mv[Y];
-        refIdxB = vi->refIdx[Y];
+        out_mvLXN[B] = vi.mv[Y];
+        refIdxB = vi.refIdx[Y];
       }
     }
   }
@@ -1593,43 +2028,52 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
       if (availableB[k]) {
         int Y=1-X;
 
-        const PredVectorInfo* vi = img->get_mv_info(xB[k],yB[k]);
+        const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
 
-        if (vi->predFlag[X]==1 &&
-            shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi->refIdx[X] ]) {
+        if (vi.predFlag[X]==1 &&
+            shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
           out_availableFlagLXN[B]=1;
-          out_mvLXN[B] = vi->mv[X];
-          refIdxB = vi->refIdx[X];
+          out_mvLXN[B] = vi.mv[X];
+          refIdxB = vi.refIdx[X];
           refPicList = X;
         }
-        else if (vi->predFlag[Y]==1 &&
-                 shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi->refIdx[Y] ]) {
+        else if (vi.predFlag[Y]==1 &&
+                 shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[Y][ vi.refIdx[Y] ]) {
           out_availableFlagLXN[B]=1;
-          out_mvLXN[B] = vi->mv[Y];
-          refIdxB = vi->refIdx[Y];
+          out_mvLXN[B] = vi.mv[Y];
+          refIdxB = vi.refIdx[Y];
           refPicList = Y;
         }
       }
 
       if (out_availableFlagLXN[B]==1) {
+        if (refIdxB<0) {
+          out_availableFlagLXN[0] = out_availableFlagLXN[1] = false;
+          return; // error
+        }
+
         assert(refPicList>=0);
         assert(refIdxB>=0);
 
-        const de265_image* refPicB=img->decctx->get_image(shdr->RefPicList[refPicList][refIdxB ]);
-        const de265_image* refPicX=img->decctx->get_image(shdr->RefPicList[X         ][refIdxLX]);
+        const de265_image* refPicB=ctx->get_image(shdr->RefPicList[refPicList][refIdxB ], shdr->InterLayerRefPic[refPicList][refIdxB ]);
+        const de265_image* refPicX=ctx->get_image(shdr->RefPicList[X         ][refIdxLX], shdr->InterLayerRefPic[X         ][refIdxLX]);
 
         int isLongTermB = shdr->LongTermRefPic[refPicList][refIdxB ];
         int isLongTermX = shdr->LongTermRefPic[X         ][refIdxLX];
 
-        if (refPicB->PicOrderCntVal != refPicX->PicOrderCntVal &&
-            !isLongTermB && !isLongTermX) {
+        if (refPicB==NULL || refPicX==NULL) {
+          img->decctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED,false);
+          img->integrity = INTEGRITY_DECODING_ERRORS;
+        }
+        else if (refPicB->PicOrderCntVal != refPicX->PicOrderCntVal &&
+                 !isLongTermB && !isLongTermX) {
           int distB = img->PicOrderCntVal - refPicB->PicOrderCntVal;
           int distX = img->PicOrderCntVal - referenced_POC;
 
           logtrace(LogMotion,"scale MVP B: B-POC:%d X-POC:%d\n",refPicB->PicOrderCntVal,refPicX->PicOrderCntVal);
 
           if (!scale_mv(&out_mvLXN[B], out_mvLXN[B], distB, distX)) {
-            img->decctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
+            ctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
             img->integrity = INTEGRITY_DECODING_ERRORS;
           }
         }
@@ -1638,22 +2082,23 @@ void derive_spatial_luma_vector_prediction(de265_image* img,
   }
 }
 
+
 // 8.5.3.1.5
-MotionVector luma_motion_vector_prediction(decoder_context* ctx,
-                                           thread_context* tctx,
-                                           int xC,int yC,int nCS,int xP,int yP,
-                                           int nPbW,int nPbH, int l,
-                                           int refIdx, int partIdx)
+void fill_luma_motion_vector_predictors(base_context* ctx,
+                                        const slice_segment_header* shdr,
+                                        de265_image* img,
+                                        int xC,int yC,int nCS,int xP,int yP,
+                                        int nPbW,int nPbH, int l,
+                                        int refIdx, int partIdx,
+                                        MotionVector out_mvpList[2])
 {
-  const slice_segment_header* shdr = tctx->shdr;
-
-
   // 8.5.3.1.6: derive two spatial vector predictors A (0) and B (1)
 
   uint8_t availableFlagLXN[2];
   MotionVector mvLXN[2];
 
-  derive_spatial_luma_vector_prediction(tctx->img, shdr, xC,yC, nCS, xP,yP, nPbW,nPbH, l, refIdx, partIdx,
+  derive_spatial_luma_vector_prediction(ctx, img, shdr, xC,yC, nCS, xP,yP,
+                                        nPbW,nPbH, l, refIdx, partIdx,
                                         availableFlagLXN, mvLXN);
 
   // 8.5.3.1.7: if we only have one spatial vector or both spatial vectors are the same,
@@ -1669,7 +2114,8 @@ MotionVector luma_motion_vector_prediction(decoder_context* ctx,
     availableFlagLXCol = 0;
   }
   else {
-    derive_temporal_luma_vector_prediction(ctx, tctx->img, shdr, xP,yP, nPbW,nPbH, refIdx,l,
+    derive_temporal_luma_vector_prediction(ctx, img, shdr,
+                                           xP,yP, nPbW,nPbH, refIdx,l,
                                            &mvLXCol, &availableFlagLXCol);
   }
 
@@ -1680,10 +2126,9 @@ MotionVector luma_motion_vector_prediction(decoder_context* ctx,
 
   // spatial predictor A
 
-  MotionVector mvpList[3];
   if (availableFlagLXN[0])
     {
-      mvpList[numMVPCandLX++] = mvLXN[0];
+      out_mvpList[numMVPCandLX++] = mvLXN[0];
     }
 
   // spatial predictor B (if not same as A)
@@ -1692,42 +2137,62 @@ MotionVector luma_motion_vector_prediction(decoder_context* ctx,
       (!availableFlagLXN[0] || // in case A in not available, but mvLXA initialized to same as mvLXB
        (mvLXN[0].x != mvLXN[1].x || mvLXN[0].y != mvLXN[1].y)))
     {
-      mvpList[numMVPCandLX++] = mvLXN[1];
+      out_mvpList[numMVPCandLX++] = mvLXN[1];
     }
 
   // temporal predictor
 
   if (availableFlagLXCol)
     {
-      mvpList[numMVPCandLX++] = mvLXCol;
+      out_mvpList[numMVPCandLX++] = mvLXCol;
     }
 
   // fill with zero predictors
 
   while (numMVPCandLX<2) {
-    mvpList[numMVPCandLX].x = 0;
-    mvpList[numMVPCandLX].y = 0;
+    out_mvpList[numMVPCandLX].x = 0;
+    out_mvpList[numMVPCandLX].y = 0;
     numMVPCandLX++;
   }
 
 
-  // select predictor according to mvp_lX_flag
-
-  return mvpList[ tctx->mvp_lX_flag[l] ];
+  assert(numMVPCandLX==2);
 }
 
-#if DE265_LOG_TRACE
-void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const VectorInfo* mv)
+
+MotionVector luma_motion_vector_prediction(base_context* ctx,
+                                           const slice_segment_header* shdr,
+                                           de265_image* img,
+                                           const motion_spec& motion,
+                                           int xC,int yC,int nCS,int xP,int yP,
+                                           int nPbW,int nPbH, int l,
+                                           int refIdx, int partIdx)
 {
-  int pred0 = mv->lum.predFlag[0];
-  int pred1 = mv->lum.predFlag[1];
+  MotionVector mvpList[2];
+
+  fill_luma_motion_vector_predictors(ctx, shdr, img,
+                                     xC,yC,nCS,xP,yP,
+                                     nPbW, nPbH, l, refIdx, partIdx,
+                                     mvpList);
+
+  // select predictor according to mvp_lX_flag
+
+  return mvpList[ l ? motion.mvp_l1_flag : motion.mvp_l0_flag ];
+}
+
+
+#if DE265_LOG_TRACE
+void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const MotionVectorSpec* mv)
+{
+  int pred0 = mv->predFlag[0];
+  int pred1 = mv->predFlag[1];
 
   logtrace(LogMotion,
            "*MV %d;%d [%d;%d] %s: (%d) %d;%d @%d   (%d) %d;%d @%d\n", x0,y0,nPbW,nPbH,mode,
            pred0,
-           pred0 ? mv->lum.mv[0].x : 0,pred0 ? mv->lum.mv[0].y : 0, pred0 ? mv->lum.refIdx[0] : 0,
+           pred0 ? mv->mv[0].x : 0,pred0 ? mv->mv[0].y : 0, pred0 ? mv->refIdx[0] : 0,
            pred1,
-           pred1 ? mv->lum.mv[1].x : 0,pred1 ? mv->lum.mv[1].y : 0, pred1 ? mv->lum.refIdx[1] : 0);
+           pred1 ? mv->mv[1].x : 0,pred1 ? mv->mv[1].y : 0, pred1 ? mv->refIdx[1] : 0);
 }
 #else
 #define logMV(x0,y0,nPbW,nPbH,mode,mv)
@@ -1736,22 +2201,27 @@ void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const VectorInfo* m
 
 
 // 8.5.3.1
-void motion_vectors_and_ref_indices(decoder_context* ctx,
-                                    thread_context* tctx,
-                                    int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH, int partIdx,
-                                    VectorInfo* out_vi)
+void motion_vectors_and_ref_indices(base_context* ctx,
+                                    const slice_segment_header* shdr,
+                                    de265_image* img,
+                                    const motion_spec& motion,
+                                    int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH,
+                                    int partIdx,
+                                    MotionVectorSpec* out_vi)
 {
   //slice_segment_header* shdr = tctx->shdr;
 
   int xP = xC+xB;
   int yP = yC+yB;
 
-  enum PredMode predMode = tctx->img->get_pred_mode(xC,yC);
+  enum PredMode predMode = img->get_pred_mode(xC,yC);
 
   if (predMode == MODE_SKIP ||
-      (predMode == MODE_INTER && tctx->merge_flag))
+      (predMode == MODE_INTER && motion.merge_flag))
     {
-      derive_luma_motion_merge_mode(ctx,tctx, xC,yC, xP,yP, nCS,nPbW,nPbH, partIdx, out_vi);
+      derive_luma_motion_merge_mode(ctx,shdr,img,
+                                    xC,yC, xP,yP, nCS,nPbW,nPbH, partIdx,
+                                    motion.merge_idx, out_vi);
 
       logMV(xP,yP,nPbW,nPbH, "merge_mode", out_vi);
     }
@@ -1762,38 +2232,39 @@ void motion_vectors_and_ref_indices(decoder_context* ctx,
     for (int l=0;l<2;l++) {
       // 1.
 
-      enum InterPredIdc inter_pred_idc = (enum InterPredIdc)tctx->inter_pred_idc;
+      enum InterPredIdc inter_pred_idc = (enum InterPredIdc)motion.inter_pred_idc;
 
       if (inter_pred_idc == PRED_BI ||
           (inter_pred_idc == PRED_L0 && l==0) ||
           (inter_pred_idc == PRED_L1 && l==1)) {
-        out_vi->lum.refIdx[l] = tctx->refIdx[l];
-        out_vi->lum.predFlag[l] = 1;
+        out_vi->refIdx[l] = motion.refIdx[l];
+        out_vi->predFlag[l] = 1;
       }
       else {
-        out_vi->lum.refIdx[l] = -1;
-        out_vi->lum.predFlag[l] = 0;
+        out_vi->refIdx[l] = -1;
+        out_vi->predFlag[l] = 0;
       }
 
       // 2.
 
-      mvdL[l][0] = tctx->mvd[l][0];
-      mvdL[l][1] = tctx->mvd[l][1];
+      mvdL[l][0] = motion.mvd[l][0];
+      mvdL[l][1] = motion.mvd[l][1];
 
 
-      if (out_vi->lum.predFlag[l]) {
+      if (out_vi->predFlag[l]) {
         // 3.
 
-        mvpL[l] = luma_motion_vector_prediction(ctx,tctx,xC,yC,nCS,xP,yP, nPbW,nPbH, l,
-                                                out_vi->lum.refIdx[l], partIdx);
+        mvpL[l] = luma_motion_vector_prediction(ctx,shdr,img,motion,
+                                                xC,yC,nCS,xP,yP, nPbW,nPbH, l,
+                                                out_vi->refIdx[l], partIdx);
 
         // 4.
 
         int32_t x = (mvpL[l].x + mvdL[l][0] + 0x10000) & 0xFFFF;
         int32_t y = (mvpL[l].y + mvdL[l][1] + 0x10000) & 0xFFFF;
 
-        out_vi->lum.mv[l].x = (x>=0x8000) ? x-0x10000 : x;
-        out_vi->lum.mv[l].y = (y>=0x8000) ? y-0x10000 : y;
+        out_vi->mv[l].x = (x>=0x8000) ? x-0x10000 : x;
+        out_vi->mv[l].y = (y>=0x8000) ? y-0x10000 : y;
       }
     }
 
@@ -1803,23 +2274,27 @@ void motion_vectors_and_ref_indices(decoder_context* ctx,
 
 
 // 8.5.3
-void decode_prediction_unit(thread_context* tctx,
+void decode_prediction_unit(base_context* ctx,
+                            const slice_segment_header* shdr,
+                            de265_image* img,
+                            const motion_spec& motion,
                             int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH, int partIdx)
 {
   logtrace(LogMotion,"decode_prediction_unit POC=%d %d;%d %dx%d\n",
-           tctx->img->PicOrderCntVal, xC+xB,yC+yB, nPbW,nPbH);
+           img->PicOrderCntVal, xC+xB,yC+yB, nPbW,nPbH);
 
-  slice_segment_header* shdr = tctx->shdr;
+  //slice_segment_header* shdr = tctx->shdr;
 
   // 1.
 
-  VectorInfo vi;
-  motion_vectors_and_ref_indices(tctx->decctx,tctx, xC,yC, xB,yB, nCS, nPbW,nPbH, partIdx, &vi);
+  MotionVectorSpec vi;
+  motion_vectors_and_ref_indices(ctx, shdr, img, motion,
+                                 xC,yC, xB,yB, nCS, nPbW,nPbH, partIdx, &vi);
 
   // 2.
 
-  generate_inter_prediction_samples(tctx->decctx,tctx->img, shdr, xC,yC, xB,yB, nCS, nPbW,nPbH, &vi);
+  generate_inter_prediction_samples(ctx,shdr, img, xC,yC, xB,yB, nCS, nPbW,nPbH, &vi);
 
 
-  tctx->img->set_mv_info(xC+xB,yC+yB,nPbW,nPbH, &vi.lum);
+  img->set_mv_info(xC+xB,yC+yB,nPbW,nPbH, vi);
 }

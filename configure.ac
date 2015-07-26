@@ -37,6 +37,8 @@ AC_PROG_GREP
 AM_INIT_AUTOMAKE
 
 CFLAGS+=" -std=c99"
+CXXFLAGS+=" -Werror=return-type"
+AX_CXX_COMPILE_STDCXX_11()
 
 dnl Use -Wall if we have gcc.
 changequote(,)dnl
@@ -48,7 +50,9 @@ if test "x$GCC" = "xyes"; then
 fi
 changequote([,])dnl
 
-gl_VISIBILITY
+dnl gl_VISIBILITY
+dnl : In encoder branch, we still export all library symbols :
+HAVE_VISIBILITY=0
 AM_CONDITIONAL([HAVE_VISIBILITY], [test "x$HAVE_VISIBILITY" != "x0"])
 
 # Checks for header files.
@@ -72,6 +76,18 @@ AC_SEARCH_LIBS([pthread_create], [pthread])
 
 AM_CONDITIONAL(MINGW, expr $host : '.*-mingw' >/dev/null 2>&1)
 
+# Check if "__STRICT_ANSI__" is required.
+AC_MSG_CHECKING([if __STRICT_ANSI__ is required])
+AC_LANG_PUSH(C++)
+AC_TRY_COMPILE([
+#include <vector>
+],[],[need_strict_ansi=no],[need_strict_ansi=yes]);
+AC_LANG_POP(C++)
+if eval "test x$need_strict_ansi = xyes"; then
+  CFLAGS+=" -D__STRICT_ANSI__"
+  CXXFLAGS+=" -D__STRICT_ANSI__"
+fi
+AC_MSG_RESULT([$need_strict_ansi])
 
 # --- machine dependent optimizations ---
 
@@ -266,8 +282,12 @@ AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([libde265/Makefile])
 AC_CONFIG_FILES([libde265/arm/Makefile])
 AC_CONFIG_FILES([libde265/x86/Makefile])
+AC_CONFIG_FILES([libde265/encoder/Makefile])
+AC_CONFIG_FILES([libde265/encoder/algo/Makefile])
 AC_CONFIG_FILES([libde265/de265-version.h])
 AC_CONFIG_FILES([dec265/Makefile])
+AC_CONFIG_FILES([enc265/Makefile])
 AC_CONFIG_FILES([sherlock265/Makefile])
+AC_CONFIG_FILES([tools/Makefile])
 AC_CONFIG_FILES([libde265.pc])
 AC_OUTPUT

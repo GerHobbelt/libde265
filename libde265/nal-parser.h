@@ -90,13 +90,14 @@ class NAL_Parser
   ~NAL_Parser();
 
   de265_error push_data(const unsigned char* data, int len,
-                        de265_PTS pts, void* user_data);
+                        de265_PTS pts, void* user_data = NULL);
 
   de265_error push_NAL(const unsigned char* data, int len,
-                       de265_PTS pts, void* user_data);
+                       de265_PTS pts, void* user_data = NULL);
 
   NAL_unit*   pop_from_NAL_queue();
-  void        push_to_NAL_queue(NAL_unit*);
+  NAL_unit*   peek_NAL_queue();
+  void push_to_NAL_queue(NAL_unit*);
   de265_error flush_data();
   void        mark_end_of_stream() { end_of_stream=true; }
   void        mark_end_of_frame() { end_of_frame=true; }
@@ -112,6 +113,10 @@ class NAL_Parser
     int size = NAL_queue.size();
     if (pending_input_NAL) { size++; }
     return size;
+  }
+
+  int number_of_complete_NAL_units_pending() const {
+    return NAL_queue.size();
   }
 
   void free_NAL_unit(NAL_unit*);
@@ -135,7 +140,6 @@ class NAL_Parser
 
   std::queue<NAL_unit*> NAL_queue;  // enqueued NALs have suffing bytes removed
   int nBytes_in_NAL_queue; // data bytes currently in NAL_queue
-
 
   // pool of unused NAL memory
 

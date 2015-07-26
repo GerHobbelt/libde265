@@ -44,4 +44,22 @@ void scale_coefficients(thread_context* tctx,
                         int nT, int cIdx,
                         bool transform_skip_flag, bool intra);
 
+
+void inv_transform(acceleration_functions* acceleration,
+                   uint8_t* dst, int dstStride, int16_t* coeff,
+                   int log2TbSize, int trType);
+
+void fwd_transform(acceleration_functions* acceleration,
+                   int16_t* coeff, int coeffStride, int log2TbSize, int trType,
+                   const int16_t* src, int srcStride);
+
+void quant_coefficients(int16_t* out_coeff,
+                        const int16_t* in_coeff,
+                        int log2TrSize, int qp,
+                        bool intra);
+
+void dequant_coefficients(int16_t* out_coeff,
+                          const int16_t* in_coeff,
+                          int log2TrSize, int qP);
+
 #endif

@@ -22,15 +22,23 @@
 #define DE265_SPS_H
 
 #include "libde265/vps.h"
+#include "libde265/vui.h"
 #include "libde265/bitstream.h"
 #include "libde265/refpic.h"
 #include "libde265/de265.h"
+#include "libde265/cabac.h"
 
 #include <vector>
 
-#define MAX_REF_PIC_SETS 64  // maximum according to standard
+class error_queue;
+class decoder_context;
+
+// #define MAX_REF_PIC_SETS 64  // maximum according to standard
 #define MAX_NUM_LT_REF_PICS_SPS 32
 
+// this is just a safety range
+#define MAX_PICTURE_WIDTH  70000
+#define MAX_PICTURE_HEIGHT 70000
 
 enum {
   CHROMA_MONO = 0,
@@ -40,6 +48,25 @@ enum {
   CHROMA_444_SEPARATE
 };
 
+struct sps_range_extension {
+  de265_error read(bitreader* reader);
+
+	bool transform_skip_rotation_enabled_flag;
+	bool transform_skip_context_enabled_flag;
+	bool implicit_rdpcm_enabled_flag;
+	bool explicit_rdpcm_enabled_flag;
+	bool extended_precision_processing_flag;
+	bool intra_smoothing_disabled_flag;
+	bool high_precision_offsets_enabled_flag;
+	bool persistent_rice_adaptation_enabled_flag;
+	bool cabac_bypass_alignment_enabled_flag;
+};
+
+struct sps_multilayer_extension {
+  de265_error read(bitreader* reader);
+
+  bool inter_view_mv_vert_constraint_flag;
+};
 
 typedef struct scaling_list_data {
   // structure size: approx. 4 kB
@@ -51,22 +78,33 @@ typedef struct scaling_list_data {
 } scaling_list_data;
 
 
-struct seq_parameter_set {
+enum PresetSet {
+  Preset_Default
+};
+
+class seq_parameter_set {
+public:
   seq_parameter_set();
   ~seq_parameter_set();
 
-  de265_error read(struct decoder_context*, bitreader*);
+  de265_error read(decoder_context*, bitreader*);
+  de265_error write(error_queue*, CABAC_encoder&);
 
-  void dump_sps(int fd) const;
+  void dump(int fd) const;
+
+  void set_defaults(enum PresetSet = Preset_Default);
+  void set_CB_log2size_range(int mini,int maxi);
+  void set_TB_log2size_range(int mini,int maxi);
+  void set_resolution(int w,int h);
 
   bool sps_read; // whether the sps has been read from the bitstream
 
 
   char video_parameter_set_id;
-  char sps_max_sub_layers;
+  char sps_max_sub_layers;            // [1;7]
   char sps_temporal_id_nesting_flag;
 
-  struct profile_tier_level profile_tier_level;
+  profile_tier_level profile_tier_level_;
 
   int seq_parameter_set_id;
   int chroma_format_idc;
@@ -91,10 +129,10 @@ struct seq_parameter_set {
   int sps_max_num_reorder_pics[7];
   int sps_max_latency_increase_plus1[7];
 
-  int  log2_min_luma_coding_block_size;
-  int  log2_diff_max_min_luma_coding_block_size;
-  int  log2_min_transform_block_size;
-  int  log2_diff_max_min_transform_block_size;
+  int  log2_min_luma_coding_block_size;             // smallest CB size [3;6]
+  int  log2_diff_max_min_luma_coding_block_size;    // largest  CB size
+  int  log2_min_transform_block_size;               // smallest TB size [2;5]
+  int  log2_diff_max_min_transform_block_size;      // largest  TB size
   int  max_transform_hierarchy_depth_inter;
   int  max_transform_hierarchy_depth_intra;
 
@@ -114,13 +152,8 @@ struct seq_parameter_set {
   int  log2_diff_max_min_pcm_luma_coding_block_size;
   char pcm_loop_filter_disable_flag;
 
-  int num_short_term_ref_pic_sets;
+  int num_short_term_ref_pic_sets() const { return ref_pic_sets.size(); }
   std::vector<ref_pic_set> ref_pic_sets; // [0 ; num_short_term_ref_pic_set (<=MAX_REF_PIC_SETS) )
-
-  /*
-    for( i = 0; i < num_short_term_ref_pic_sets; i++)
-    short_term_ref_pic_set(i)
-  */
 
   char long_term_ref_pics_present_flag;
 
@@ -133,20 +166,26 @@ struct seq_parameter_set {
   char strong_intra_smoothing_enable_flag;
   char vui_parameters_present_flag;
 
-  /*
-    if( vui_parameters_present_flag )
-      vui_parameters()
-  */
+  video_usability_information vui;
 
-  char sps_extension_flag;
+  // Multilayer extensions
+  int  sps_ext_or_max_sub_layers_minus1; // Annex F (Multilayer extensions)
+  profile_tier_level ptl;
 
-  /*
-    if( sps_extension_flag )
-    while( more_rbsp_data() )
-    sps_extension_data_flag
-    u(1)
-    rbsp_trailing_bits()
-  */
+  bool update_rep_format_flag;
+  int  sps_rep_format_idx;
+
+  bool sps_extension_present_flag;
+  bool sps_range_extension_flag;
+  bool sps_multilayer_extension_flag;
+  int  sps_extension_6bits;
+  
+  sps_range_extension range_extension;
+  sps_multilayer_extension multilayer_extension;
+
+  // --- derived values ---
+
+  de265_error compute_derived_values();
 
   int BitDepth_Y;
   int QpBdOffset_Y;
@@ -158,7 +197,7 @@ struct seq_parameter_set {
   int WinUnitX, WinUnitY;
 
   int MaxPicOrderCntLsb;
-  
+
   int Log2MinCbSizeY;
   int Log2CtbSizeY;
   int MinCbSizeY;
@@ -188,9 +227,21 @@ struct seq_parameter_set {
   int Log2MaxIpcmCbSizeY;
 
   int SpsMaxLatencyPictures[7]; // [temporal layer]
+
+
+  int getPUIndexRS(int pixelX,int pixelY) const {
+    return (pixelX>>Log2MinPUSize) + (pixelY>>Log2MinPUSize)*PicWidthInMinPUs;
+  }
+
+  int get_bit_depth(int cIdx) const {
+    if (cIdx==0) return BitDepth_Y;
+    else         return BitDepth_C;
+  }
 };
 
 de265_error read_scaling_list(bitreader*, const seq_parameter_set*, scaling_list_data*, bool inPPS);
+de265_error write_scaling_list(CABAC_encoder& out, const seq_parameter_set* sps,
+                               scaling_list_data* sclist, bool inPPS);
 void set_default_scaling_lists(scaling_list_data*);
 
 #endif

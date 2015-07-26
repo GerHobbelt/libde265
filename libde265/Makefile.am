@@ -27,6 +27,7 @@ libde265_la_SOURCES = \
   de265.cc \
   deblock.cc \
   decctx.cc \
+  decctx-multilayer.cc \
   nal-parser.cc \
   nal-parser.h \
   dpb.cc \
@@ -44,7 +45,8 @@ libde265_la_SOURCES = \
   slice.cc \
   sps.cc \
   util.cc \
-  vps.cc \
+  vps.cc vps.h \
+  vps-extension.cc vps-extension.h \
   bitstream.h \
   cabac.h \
   deblock.h \
@@ -62,21 +64,31 @@ libde265_la_SOURCES = \
   slice.h \
   sps.h \
   util.h \
-  vps.h \
+  vui.cc vui.h \
   motion.cc motion.h \
   threads.cc threads.h \
   visualize.cc visualize.h \
   acceleration.h \
   fallback.cc fallback.h fallback-motion.cc fallback-motion.h \
-  fallback-dct.h fallback-dct.cc
+  fallback-dct.h fallback-dct.cc \
+  fallback-upsampling.h fallback-upsampling.cc \
+  quality.cc quality.h \
+  configparam.cc configparam.h \
+  image-io.h image-io.cc \
+  alloc_pool.h alloc_pool.cc \
+  en265.h en265.cc \
+  contextmodel.cc
+
+SUBDIRS = encoder
+libde265_la_LIBADD += encoder/libde265_encoder.la
 
 if ENABLE_SSE_OPT
-  SUBDIRS = x86
+  SUBDIRS += x86
   libde265_la_LIBADD += x86/libde265_x86.la
 endif
 
 if ENABLE_ARM_OPT
-  SUBDIRS = arm
+  SUBDIRS += arm
   libde265_la_LIBADD += arm/libde265_arm.la
 endif
 

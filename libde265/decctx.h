@@ -38,17 +38,19 @@
 #define DE265_MAX_VPS_SETS 16   // this is the maximum as defined in the standard
 #define DE265_MAX_SPS_SETS 16   // this is the maximum as defined in the standard
 #define DE265_MAX_PPS_SETS 64   // this is the maximum as defined in the standard
-#define MAX_THREAD_CONTEXTS 68  // enough for 4K @ 32 pixel CTBs, but TODO: make this dynamic
 
 #define MAX_WARNINGS 20
 
 
-struct slice_segment_header;
-struct image_unit;
+class slice_segment_header;
+class image_unit;
+class slice_unit;
+class decoder_context;
+struct multilayer_decoder_parameters;
 
-
-struct thread_context
+class thread_context
 {
+public:
   thread_context();
 
   int CtbAddrInRS;
@@ -59,12 +61,7 @@ struct thread_context
 
   // motion vectors
 
-  int8_t  refIdx[2];
-  int16_t mvd[2][2]; // only in top left position
-  uint8_t merge_flag;
-  uint8_t merge_idx;
-  uint8_t mvp_lX_flag[2];
-  uint8_t inter_pred_idc; // enum InterPredIdc
+  motion_spec motion;
 
 
   // prediction
@@ -98,14 +95,15 @@ struct thread_context
 
   CABAC_decoder cabac_decoder;
 
-  context_model ctx_model[CONTEXT_MODEL_TABLE_LENGTH];
+  context_model_table ctx_model;
 
-  struct decoder_context* decctx;
+  decoder_context* decctx;
   struct de265_image *img;
-  struct slice_segment_header* shdr;
+  slice_segment_header* shdr;
 
-  struct image_unit* imgunit;
-  struct thread_task* task; // executing thread_task or NULL if not multi-threaded
+  image_unit* imgunit;
+  slice_unit* sliceunit;
+  thread_task* task; // executing thread_task or NULL if not multi-threaded
 
 private:
   thread_context(const thread_context&); // not allowed
@@ -131,8 +129,9 @@ class error_queue
 
 
 
-struct slice_unit
+class slice_unit
 {
+public:
   slice_unit(decoder_context* decctx);
   ~slice_unit();
 
@@ -140,32 +139,48 @@ struct slice_unit
   slice_segment_header* shdr;  // not the owner (de265_image is owner)
   bitreader reader;
 
-  struct image_unit* imgunit;
+  image_unit* imgunit;
 
   bool flush_reorder_buffer;
 
-  enum { Unprocessed,
-         Inprogress,
-         Decoded
+
+  // decoding status
+
+  enum SliceDecodingProgress { Unprocessed,
+                               InProgress,
+                               Decoded
   } state;
 
+  de265_progress_lock finished_threads;
+  int nThreads;
+
+  int first_decoded_CTB_RS; // TODO
+  int last_decoded_CTB_RS;  // TODO
+
   void allocate_thread_contexts(int n);
-  thread_context* get_thread_context(int n) { return &thread_contexts[n]; }
+  thread_context* get_thread_context(int n) {
+    assert(n < nThreadContexts);
+    return &thread_contexts[n];
+  }
+  int num_thread_contexts() const { return nThreadContexts; }
 
 private:
   thread_context* thread_contexts; /* NOTE: cannot use std::vector, because thread_context has
                                       no copy constructor. */
+  int nThreadContexts;
 
+public:
   decoder_context* ctx;
 
-
+private:
   slice_unit(const slice_unit&); // not allowed
   const slice_unit& operator=(const slice_unit&); // not allowed
 };
 
 
-struct image_unit
+class image_unit
 {
+public:
   image_unit();
   ~image_unit();
 
@@ -174,6 +189,53 @@ struct image_unit
 
   std::vector<slice_unit*> slice_units;
   std::vector<sei_message> suffix_SEIs;
+
+  slice_unit* get_next_unprocessed_slice_segment() const {
+    for (int i=0;i<slice_units.size();i++) {
+      if (slice_units[i]->state == slice_unit::Unprocessed) {
+        return slice_units[i];
+      }
+    }
+
+    return NULL;
+  }
+
+  slice_unit* get_prev_slice_segment(slice_unit* s) const {
+    for (int i=1; i<slice_units.size(); i++) {
+      if (slice_units[i]==s) {
+        return slice_units[i-1];
+      }
+    }
+
+    return NULL;
+  }
+
+  slice_unit* get_next_slice_segment(slice_unit* s) const {
+    for (int i=0; i<slice_units.size()-1; i++) {
+      if (slice_units[i]==s) {
+        return slice_units[i+1];
+      }
+    }
+
+    return NULL;
+  }
+
+  void dump_slices() const {
+    for (int i=0; i<slice_units.size(); i++) {
+      printf("[%d] = %p\n",i,slice_units[i]);
+    }
+  }
+
+  bool all_slice_segments_processed() const {
+    if (slice_units.size()==0) return true;
+    if (slice_units.back()->state != slice_unit::Unprocessed) return true;
+    return false;
+  }
+
+  bool is_first_slice_segment(const slice_unit* s) const {
+    if (slice_units.size()==0) return false;
+    return (slice_units[0] == s);
+  }
 
   enum { Invalid, // headers not read yet
          Unknown, // SPS/PPS available
@@ -192,12 +254,32 @@ struct image_unit
   /* Saved context models for WPP.
      There is one saved model for the initialization of each CTB row.
      The array is unused for non-WPP streams. */
-  std::vector<context_model> ctx_models;  // TODO: move this into image ?
+  std::vector<context_model_table> ctx_models;  // TODO: move this into image ?
 };
 
 
+class base_context : public error_queue
+{
+ public:
+  base_context();
+  virtual ~base_context() { }
 
-class decoder_context : public error_queue {
+  // --- accelerated DSP functions ---
+
+  void set_acceleration_functions(enum de265_acceleration);
+
+  struct acceleration_functions acceleration; // CPU optimized functions
+
+  //virtual /* */ de265_image* get_image(int dpb_index)       { return dpb.get_image(dpb_index); }
+  
+  // Get the image with the given id from the DPB. Multi layer extensions:
+  // If il_picture is true, the picture is fetched from the inter layer references (ilRefPic).
+  virtual const de265_image* get_image(int frame_id, bool il_picture=false) const = 0;
+  virtual bool has_image(int frame_id, bool il_picture=false) const = 0;
+};
+
+class decoder_context_multilayer;
+class decoder_context : public base_context {
  public:
   decoder_context();
   ~decoder_context();
@@ -207,6 +289,7 @@ class decoder_context : public error_queue {
 
   void reset();
 
+      video_parameter_set* get_vps(int id);
   /* */ seq_parameter_set* get_sps(int id)       { return &sps[id]; }
   const seq_parameter_set* get_sps(int id) const { return &sps[id]; }
   /* */ pic_parameter_set* get_pps(int id)       { return &pps[id]; }
@@ -224,12 +307,14 @@ class decoder_context : public error_queue {
   de265_error decode_NAL(NAL_unit* nal);
 
   de265_error decode(int* more);
-  de265_error decode_some();
+  // Set new_image to true if you know that there will not be any more data for the current image.
+  de265_error decode_some(bool* did_work, bool new_image=false);
 
   de265_error decode_slice_unit_sequential(image_unit* imgunit, slice_unit* sliceunit);
   de265_error decode_slice_unit_parallel(image_unit* imgunit, slice_unit* sliceunit);
   de265_error decode_slice_unit_WPP(image_unit* imgunit, slice_unit* sliceunit);
   de265_error decode_slice_unit_tiles(image_unit* imgunit, slice_unit* sliceunit);
+
 
   void process_nal_hdr(nal_header*);
   void process_vps(video_parameter_set*);
@@ -243,6 +328,16 @@ class decoder_context : public error_queue {
   //void push_current_picture_to_output_queue();
   de265_error push_picture_to_output_queue(image_unit*);
 
+  // Multi layer extension
+  void set_layer_id(int id) { layer_ID = id; }
+  int  get_layer_id()       { return layer_ID; }
+  decoder_context_multilayer* get_multi_layer_decoder() { return ml_decoder; }
+  void set_multi_layer_decoder(decoder_context_multilayer* p) { ml_decoder = p; }
+  video_parameter_set *get_last_parsed_vps() {return last_vps;}
+  
+  // The dec context only has a pointer to the multilayer_decoder_context nal parser,
+  // but no nal parser itself.
+  NAL_Parser* nal_parser; 
 
   // --- parameters ---
 
@@ -266,24 +361,15 @@ class decoder_context : public error_queue {
   void*                  param_image_allocation_userdata;
 
 
-  // --- accelerated DSP functions ---
-
-  void set_acceleration_functions(enum de265_acceleration);
-
-  struct acceleration_functions acceleration; // CPU optimized functions
-
-
   // --- input stream data ---
-
-  NAL_Parser nal_parser;
-
 
   int get_num_worker_threads() const { return num_worker_threads; }
 
-  /* */ de265_image* get_image(int dpb_index)       { return dpb.get_image(dpb_index); }
-  const de265_image* get_image(int dpb_index) const { return dpb.get_image(dpb_index); }
+  // Multilayer extension: If il_picture is true, the picture is fetched from the inter layer references (ilRefPic).
+  /* */ de265_image* get_image(int dpb_index, bool il_pic=false)       { return il_pic ? ilRefPic[dpb_index] : dpb.get_image(dpb_index); }
+  const de265_image* get_image(int dpb_index, bool il_pic=false) const { return il_pic ? ilRefPic[dpb_index] : dpb.get_image(dpb_index); }
 
-  bool has_image(int dpb_index) const { return dpb_index>=0 && dpb_index<dpb.size(); }
+  bool has_image(int dpb_index, bool il_pic=false) const { return il_pic ? ilRefPic[dpb_index]!=NULL : dpb_index>=0 && dpb_index<dpb.size(); }
 
   de265_image* get_next_picture_in_output_queue() { return dpb.get_next_picture_in_output_queue(); }
   int          num_pictures_in_output_queue() const { return dpb.num_pictures_in_output_queue(); }
@@ -300,6 +386,11 @@ class decoder_context : public error_queue {
  private:
   // --- internal data ---
 
+  // Multi layer extensions
+  int layer_ID;
+  decoder_context_multilayer *ml_decoder;
+  video_parameter_set *last_vps;    // A pointer to the most recently parsed VPS
+
   video_parameter_set  vps[ DE265_MAX_VPS_SETS ];
   seq_parameter_set    sps[ DE265_MAX_SPS_SETS ];
   pic_parameter_set    pps[ DE265_MAX_PPS_SETS ];
@@ -309,7 +400,7 @@ class decoder_context : public error_queue {
   pic_parameter_set*   current_pps;
 
  public:
-  struct thread_pool thread_pool;
+  thread_pool thread_pool_;
 
  private:
   int num_worker_threads;
@@ -361,6 +452,14 @@ class decoder_context : public error_queue {
 
   de265_image* img;
 
+  // Multilayer extensions
+
+  // pointers to the (upsampled) reference layer reconstruction images. In case of SNR scalability these
+  // are just pointers to the images from the reference layer dpb. In case of spatial scalability we have
+  // to allocate new images and call the inter layer upsampling process (H.8.1.4.1 and H.8.1.4.2).
+  de265_image* ilRefPic[MAX_REF_LAYERS];
+  bool ilRefPic_upsampled;  // If true, ilRefPic contains new images which have to be deleted after decoding.
+
  public:
   const slice_segment_header* previous_slice_header; /* Remember the last slice for a successive
                                                         dependent slice. */
@@ -397,6 +496,11 @@ class decoder_context : public error_queue {
   int RefPicSetLtCurr[MAX_NUM_REF_PICS];
   int RefPicSetLtFoll[MAX_NUM_REF_PICS];
 
+  // Multi layer extension
+  int RefPicSetInterLayer0[MAX_REF_LAYERS]; // Idx into ilRefPic
+  int RefPicSetInterLayer1[MAX_REF_LAYERS]; // Idx into ilRefPic
+  int NumActiveRefLayerPics0;
+  int NumActiveRefLayerPics1;
 
   // --- parameters derived from parameter sets ---
 
@@ -415,10 +519,14 @@ class decoder_context : public error_queue {
   bool flush_reorder_buffer_at_this_frame;
 
  private:
-  void init_thread_context(class thread_context* tctx);
-  void add_task_decode_CTB_row(thread_context* tctx, bool firstSliceSubstream);
-  void add_task_decode_slice_segment(thread_context* tctx, bool firstSliceSubstream);
+  void init_thread_context(thread_context* tctx);
+  void add_task_decode_CTB_row(thread_context* tctx, bool firstSliceSubstream, int ctbRow);
+  void add_task_decode_slice_segment(thread_context* tctx, bool firstSliceSubstream,
+                                     int ctbX,int ctbY);
 
+  void mark_whole_slice_as_processed(image_unit* imgunit,
+                                     slice_unit* sliceunit,
+                                     int progress);
 
   void process_picture_order_count(decoder_context* ctx, slice_segment_header* hdr);
   int generate_unavailable_reference_picture(decoder_context* ctx, const seq_parameter_set* sps,
@@ -428,8 +536,12 @@ class decoder_context : public error_queue {
 
 
   void remove_images_from_dpb(const std::vector<int>& removeImageList);
-  void run_postprocessing_filters_sequential(de265_image* img);
+  void run_postprocessing_filters_sequential(struct de265_image* img);
   void run_postprocessing_filters_parallel(image_unit* img);
+
+  // Multilayer extension
+  void process_inter_layer_reference_picture_set(decoder_context* ctx, slice_segment_header* hdr);
+  void derive_inter_layer_reference_picture(decoder_context* ctx, de265_image* rlPic, int rLId, int ilRefPicIdx);
 };
 
 

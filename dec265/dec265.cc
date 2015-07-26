@@ -38,6 +38,8 @@
 #include <unistd.h>
 #endif
 
+#include "libde265/quality.h"
+
 #if HAVE_VIDEOGFX
 #include <libvideogfx.hh>
 using namespace videogfx;
@@ -50,10 +52,11 @@ using namespace videogfx;
 
 #define BUFFER_SIZE 40960
 #define NUM_THREADS 4
+#define MAX_LAYERS 63
 
 int nThreads=0;
 bool nal_input=false;
-bool quiet=false;
+int quiet=0;
 bool check_hash=false;
 bool show_help=false;
 bool dump_headers=false;
@@ -65,6 +68,12 @@ const char *output_filename = "out.yuv";
 uint32_t max_frames=UINT32_MAX;
 bool write_bytestream=false;
 const char *bytestream_filename;
+bool measure_quality=false;
+bool show_ssim_map=false;
+bool show_psnr_map=false;
+const char* reference_filename;
+FILE* reference_file;
+FILE* fh[MAX_LAYERS];
 int highestTID = 100;
 int verbosity=0;
 int disable_deblocking=0;
@@ -84,6 +93,9 @@ static struct option long_options[] = {
   {"help",       no_argument,       0, 'h' },
   {"noaccel",    no_argument,       0, '0' },
   {"write-bytestream", required_argument,0, 'B' },
+  {"measure",     required_argument, 0, 'm' },
+  {"ssim",        no_argument,       0, 's' },
+  {"errmap",      no_argument,       0, 'e' },
   {"highest-TID", required_argument, 0, 'T' },
   {"verbose",    no_argument,       0, 'v' },
   {"disable-deblocking", no_argument, &disable_deblocking, 1 },
@@ -95,22 +107,56 @@ static struct option long_options[] = {
 
 static void write_picture(const de265_image* img)
 {
-  static FILE* fh = NULL;
-  if (fh==NULL) { fh = fopen(output_filename, "wb"); }
+  // Check which layer this image is from
+  int nalunit_type, nuh_layer_id, nuh_temporal_id;
+  de265_get_image_NAL_header(img, &nalunit_type, NULL, &nuh_layer_id, &nuh_temporal_id);
 
-  
+  if (fh[nuh_layer_id]==NULL) {
+    // Construct layer file name
+    std::string out_filename = output_filename;
+    int dot_pos = out_filename.find(".");
+    std::string layer_out_filename = out_filename.substr(0, dot_pos);
+    std::string extension = out_filename.substr(dot_pos);
+    layer_out_filename.append("_");
+    layer_out_filename.append(std::to_string(nuh_layer_id));
+    layer_out_filename.append(extension);
+
+    fh[nuh_layer_id] = fopen(layer_out_filename.c_str(), "wb");
+  }
 
   for (int c=0;c<3;c++) {
     int stride;
     const uint8_t* p = de265_get_image_plane(img, c, &stride);
     int width = de265_get_image_width(img,c);
 
-    for (int y=0;y<de265_get_image_height(img,c);y++) {
-      fwrite(p + y*stride, width, 1, fh);
+    if (de265_get_bits_per_pixel(img,c)<=8) {
+      // --- save 8 bit YUV ---
+
+      for (int y=0;y<de265_get_image_height(img,c);y++) {
+        fwrite(p + y*stride, width, 1, fh[nuh_layer_id]);
+      }
+    }
+    else {
+      // --- save 16 bit YUV ---
+
+      uint8_t* buf = new uint8_t[width*2];
+      uint16_t* p16 = (uint16_t*)p;
+
+      for (int y=0;y<de265_get_image_height(img,c);y++) {
+        for (int x=0;x<width;x++) {
+          uint16_t pixel_value = (p16+y*stride)[x];
+          buf[2*x+0] = pixel_value & 0xFF;
+          buf[2*x+1] = pixel_value >> 8;
+        }
+
+        fwrite(buf, width*2, 1, fh[nuh_layer_id]);
+      }
+
+      delete[] buf;
     }
   }
-  
-  fflush(fh);
+
+  fflush(fh[nuh_layer_id]);
 }
 
 
@@ -147,8 +193,20 @@ void display_image(const struct de265_image* img)
     width  = de265_get_image_width(img,ch);
     height = de265_get_image_height(img,ch);
 
-    for (int y=0;y<height;y++) {
-      memcpy(visu.AskFrame((BitmapChannel)ch)[y], data + y*stride, width);
+    int bit_depth = de265_get_bits_per_pixel(img,ch);
+
+    if (bit_depth==8) {
+      for (int y=0;y<height;y++) {
+        memcpy(visu.AskFrame((BitmapChannel)ch)[y], data + y*stride, width);
+      }
+    }
+    else {
+      const uint16_t* data16 = (const uint16_t*)data;
+      for (int y=0;y<height;y++) {
+        for (int x=0;x<width;x++) {
+          visu.AskFrame((BitmapChannel)ch)[y][x] = *(data16 + y*stride +x) >> (bit_depth-8);
+        }
+      }
     }
   }
 
@@ -157,16 +215,34 @@ void display_image(const struct de265_image* img)
 }
 #endif
 
+static uint8_t* convert_to_8bit(const uint8_t* data, int width, int height, int stride, int bit_depth)
+{
+  const uint16_t* data16 = (const uint16_t*)data;
+  uint8_t* out = new uint8_t[stride*height];
+
+  for (int y=0;y<height;y++) {
+    for (int x=0;x<width;x++) {
+      out[y*stride + x] = *(data16 + y*stride +x) >> (bit_depth-8);
+    }
+  }
+
+  return out;
+}
+
+
 #if HAVE_SDL
 SDL_YUV_Display sdlWin;
 bool sdl_active=false;
 
 bool display_sdl(const struct de265_image* img)
 {
-  if (!sdl_active) {
-    int width  = de265_get_image_width(img,0);
-    int height = de265_get_image_height(img,0);
+  int width  = de265_get_image_width(img,0);
+  int height = de265_get_image_height(img,0);
 
+  int chroma_width  = de265_get_image_width(img,1);
+  int chroma_height = de265_get_image_height(img,1);
+
+  if (!sdl_active) {
     sdl_active=true;
     sdlWin.init(width,height);
   }
@@ -176,26 +252,47 @@ bool display_sdl(const struct de265_image* img)
   const uint8_t* cb =de265_get_image_plane(img,1,&chroma_stride);
   const uint8_t* cr =de265_get_image_plane(img,2,NULL);
 
+  uint8_t* y16  = NULL;
+  uint8_t* cb16 = NULL;
+  uint8_t* cr16 = NULL;
+  int bd;
+
+  if ((bd=de265_get_bits_per_pixel(img, 0)) > 8) {
+    y16  = convert_to_8bit(y,  width,height,stride,bd); y=y16;
+  }
+  if ((bd=de265_get_bits_per_pixel(img, 1)) > 8) {
+    cb16 = convert_to_8bit(cb, chroma_width,chroma_height,chroma_stride,bd); cb=cb16;
+  }
+  if ((bd=de265_get_bits_per_pixel(img, 2)) > 8) {
+    cr16 = convert_to_8bit(cr, chroma_width,chroma_height,chroma_stride,bd); cr=cr16;
+  }
+
   sdlWin.display(y,cb,cr, stride, chroma_stride);
+
+  delete[] y16;
+  delete[] cb16;
+  delete[] cr16;
 
   return sdlWin.doQuit();
 }
 #endif
 
 
-static int width,height;
-static uint32_t framecnt=0;
+static int width[MAX_LAYERS],height[MAX_LAYERS];
+static uint32_t framecnt[MAX_LAYERS]={0};
 
 bool output_image(const de265_image* img)
 {
   bool stop=false;
 
-  width  = de265_get_image_width(img,0);
-  height = de265_get_image_height(img,0);
+  // Get layer ID
+  int nuh_layer_id;
+  de265_get_image_NAL_header(img, NULL, NULL, &nuh_layer_id, NULL);
 
-  framecnt++;
+  framecnt[nuh_layer_id]++;
+  width[nuh_layer_id]  = de265_get_image_width(img,0);
+  height[nuh_layer_id] = de265_get_image_height(img,0);
   //printf("SHOW POC: %d / PTS: %ld / integrity: %d\n",img->PicOrderCntVal, img->pts, img->integrity);
-
 
   if (0) {
     const char* nal_unit_name;
@@ -224,15 +321,136 @@ bool output_image(const de265_image* img)
     write_picture(img);
   }
 
-  if ((framecnt%100)==0) {
-    fprintf(stderr,"frame %d\r",framecnt);
+  if (nuh_layer_id==0 && (framecnt[0]%100)==0) {
+    fprintf(stderr,"frame %d\r",framecnt[0]);
   }
 
-  if (framecnt>=max_frames) {
+  if (framecnt[nuh_layer_id]>=max_frames) {
     stop=true;
   }
 
   return stop;
+}
+
+
+static double mse_y=0.0, mse_cb=0.0, mse_cr=0.0;
+static int    mse_frames=0;
+
+static double ssim_y=0.0;
+static int    ssim_frames=0;
+
+void measure(const de265_image* img)
+{
+  // --- compute PSNR ---
+
+  int width  = de265_get_image_width(img,0);
+  int height = de265_get_image_height(img,0);
+
+  uint8_t* p = (uint8_t*)malloc(width*height*3/2);
+
+  fread(p,1,width*height*3/2,reference_file);
+
+  int stride, cstride;
+  const uint8_t* yptr  = de265_get_image_plane(img,0, &stride);
+  const uint8_t* cbptr = de265_get_image_plane(img,1, &cstride);
+  const uint8_t* crptr = de265_get_image_plane(img,2, &cstride);
+
+  double img_mse_y  = MSE( yptr,  stride, p, width,   width, height);
+  double img_mse_cb = MSE(cbptr, cstride, p+width*height,      width/2, width/2,height/2);
+  double img_mse_cr = MSE(crptr, cstride, p+width*height*5/4,  width/2, width/2,height/2);
+
+  mse_frames++;
+
+  mse_y  += img_mse_y;
+  mse_cb += img_mse_cb;
+  mse_cr += img_mse_cr;
+
+
+
+  // --- compute SSIM ---
+
+  double ssimSum = 0.0;
+
+#if HAVE_VIDEOGFX
+  Bitmap<Pixel> ref, coded;
+  ref  .Create(width, height); // reference image
+  coded.Create(width, height); // coded image
+
+  const uint8_t* data;
+  data = de265_get_image_plane(img,0,&stride);
+
+  for (int y=0;y<height;y++) {
+    memcpy(coded[y], data + y*stride, width);
+    memcpy(ref[y],   p    + y*stride, width);
+  }
+
+  SSIM ssimAlgo;
+  Bitmap<float> ssim = ssimAlgo.calcSSIM(ref,coded);
+
+  Bitmap<Pixel> ssimMap;
+  ssimMap.Create(width,height);
+
+  for (int y=0;y<height;y++)
+    for (int x=0;x<width;x++)
+      {
+        float v = ssim[y][x];
+        ssimSum += v;
+        v = v*v;
+        v = 255*v; //pow(v, 20);
+
+        //assert(v<=255.0);
+        ssimMap[y][x] = v;
+      }
+
+  ssimSum /= width*height;
+
+
+  Bitmap<Pixel> error_map = CalcErrorMap(ref, coded, TransferCurve_Sqrt);
+
+
+  // display PSNR error map
+
+  if (show_psnr_map) {
+    static X11Win win;
+    static bool first=true;
+
+    if (first) {
+      first=false;
+      win.Create(de265_get_image_width(img,0),
+                 de265_get_image_height(img,0),
+                 "psnr output");
+    }
+
+    win.Display(MakeImage(error_map));
+  }
+
+
+  // display SSIM error map
+
+  if (show_ssim_map) {
+    static X11Win win;
+    static bool first=true;
+
+    if (first) {
+      first=false;
+      win.Create(de265_get_image_width(img,0),
+                 de265_get_image_height(img,0),
+                 "ssim output");
+    }
+
+    win.Display(MakeImage(ssimMap));
+  }
+#endif
+
+  ssim_frames++;
+  ssim_y += ssimSum;
+
+  printf("%5d   %6f %6f %6f %6f\n",
+         framecnt,
+         PSNR(img_mse_y), PSNR(img_mse_cb), PSNR(img_mse_cr),
+         ssimSum);
+
+  free(p);
 }
 
 
@@ -299,12 +517,17 @@ void (*volatile __malloc_initialize_hook)(void) = init_my_hooks;
 #endif
 #endif
 
+
 int main(int argc, char** argv)
 {
+  for (int i = 0; i < MAX_LAYERS; i++) {
+    fh[i] = NULL;
+  }
+
   while (1) {
     int option_index = 0;
 
-    int c = getopt_long(argc, argv, "qt:chf:o:dLB:n0vT:"
+    int c = getopt_long(argc, argv, "qt:chf:o:dLB:n0vT:m:se"
 #if HAVE_VIDEOGFX && HAVE_SDL
                         "V"
 #endif
@@ -313,7 +536,7 @@ int main(int argc, char** argv)
       break;
 
     switch (c) {
-    case 'q': quiet=true; break;
+    case 'q': quiet++; break;
     case 't': nThreads=atoi(optarg); break;
     case 'c': check_hash=true; break;
     case 'f': max_frames=atoi(optarg); break;
@@ -325,6 +548,9 @@ int main(int argc, char** argv)
     case 'L': logging=false; break;
     case '0': no_acceleration=true; break;
     case 'B': write_bytestream=true; bytestream_filename=optarg; break;
+    case 'm': measure_quality=true; reference_filename=optarg; break;
+    case 's': show_ssim_map=true; break;
+    case 'e': show_psnr_map=true; break;
     case 'T': highestTID=atoi(optarg); break;
     case 'v': verbosity++; break;
     }
@@ -348,8 +574,14 @@ int main(int argc, char** argv)
     fprintf(stderr,"  -V, --videogfx    output with videogfx instead of SDL\n");
 #endif
     fprintf(stderr,"  -0, --noaccel     do not use any accelerated code (SSE)\n");
+    fprintf(stderr,"  -v, --verbose     increase verbosity level (up to 3 times)\n");
     fprintf(stderr,"  -L, --no-logging  disable logging\n");
     fprintf(stderr,"  -B, --write-bytestream FILENAME  write raw bytestream (from NAL input)\n");
+    fprintf(stderr,"  -m, --measure YUV compute PSNRs relative to reference YUV\n");
+#if HAVE_VIDEOGFX
+    fprintf(stderr,"  -s, --ssim        show SSIM-map (only when -m active)\n");
+    fprintf(stderr,"  -e, --errmap      show error-map (only when -m active)\n");
+#endif
     fprintf(stderr,"  -T, --highest-TID select highest temporal sublayer to decode\n");
     fprintf(stderr,"      --disable-deblocking   disable deblocking filter\n");
     fprintf(stderr,"      --disable-sao          disable sample-adaptive offset filter\n");
@@ -395,6 +627,10 @@ int main(int argc, char** argv)
 
   de265_set_limit_TID(ctx, highestTID);
 
+
+  if (measure_quality) {
+    reference_file = fopen(reference_filename, "rb");
+  }
 
 
   FILE* fh = fopen(argv[optind], "rb");
@@ -494,6 +730,10 @@ int main(int argc, char** argv)
 
           const de265_image* img = de265_get_next_picture(ctx);
           if (img) {
+            if (measure_quality) {
+              measure(img);
+            }
+
             stop = output_image(img);
             if (stop) more=0;
             else      more=1;
@@ -507,7 +747,7 @@ int main(int argc, char** argv)
               break;
             }
 
-            fprintf(stderr,"WARNING: %s\n", de265_get_error_text(warning));
+            if (quiet<=1) fprintf(stderr,"WARNING: %s\n", de265_get_error_text(warning));
           }
         }
     }
@@ -518,20 +758,36 @@ int main(int argc, char** argv)
     fclose(bytestream_fh);
   }
 
+  if (measure_quality) {
+    printf("#total  %6f %6f %6f %6f\n",
+           PSNR(mse_y /mse_frames),
+           PSNR(mse_cb/mse_frames),
+           PSNR(mse_cr/mse_frames),
+           ssim_y/ssim_frames);
+
+    fclose(reference_file);
+  }
+
   de265_free_decoder(ctx);
 
   struct timeval tv_end;
   gettimeofday(&tv_end, NULL);
 
   if (err != DE265_OK) {
-    fprintf(stderr,"decoding error: %s (code=%d)\n", de265_get_error_text(err), err);
+    if (quiet<=1) fprintf(stderr,"decoding error: %s (code=%d)\n", de265_get_error_text(err), err);
   }
 
   double secs = tv_end.tv_sec-tv_start.tv_sec;
   secs += (tv_end.tv_usec - tv_start.tv_usec)*0.001*0.001;
 
-  fprintf(stderr,"nFrames decoded: %d (%dx%d @ %5.2f fps)\n",framecnt,
-          width,height,framecnt/secs);
+  if (quiet<=1) {
+    for (int i = 0; i<MAX_LAYERS; i++) {
+      if (framecnt[i] > 0) {
+        fprintf(stderr,"Layer %d: nFrames decoded: %d (%dx%d @ %5.2f fps)\n",
+          i, framecnt[i], width[i],height[i],framecnt[i]/secs);
+      }
+    }
+  }
 
 
   return err==DE265_OK ? 0 : 10;

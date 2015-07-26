@@ -26,6 +26,7 @@
 #endif
 
 #include <stdio.h>
+#include <map>
 
 #include "libde265/de265.h"
 
@@ -45,10 +46,32 @@
 #define ALIGNED_8( var )  LIBDE265_DECLARE_ALIGNED( var, 8 )
 #define ALIGNED_4( var )  LIBDE265_DECLARE_ALIGNED( var, 4 )
 
+// C++11 specific features
+#ifdef _MSC_VER
+#define FOR_LOOP(type, var, list)   for each (type var in list)
+#undef FOR_LOOP_AUTO_SUPPORT
+#else
+#define FOR_LOOP(type, var, list)   for (type var : list)
+#define FOR_LOOP_AUTO_SUPPORT 1
+#endif
+#ifdef USE_STD_TR1_NAMESPACE
+#include <tr1/memory>
+namespace std { using namespace std::tr1; }
+#endif
 
+#ifdef _MSC_VER
+  #ifdef _CPPRTTI
+  #define RTTI_ENABLED
+  #endif
+#else
+  #ifdef __GXX_RTTI
+  #define RTTI_ENABLED
+  #endif
+#endif
 
 //inline uint8_t Clip1_8bit(int16_t value) { if (value<=0) return 0; else if (value>=255) return 255; else return value; }
 #define Clip1_8bit(value) ((value)<0 ? 0 : (value)>255 ? 255 : (value))
+#define Clip_BitDepth(value, bit_depth) ((value)<0 ? 0 : (value)>((1<<bit_depth)-1) ? ((1<<bit_depth)-1) : (value))
 #define Clip3(low,high,value) ((value)<(low) ? (low) : (value)>(high) ? (high) : (value))
 #define Sign(value) (((value)<0) ? -1 : ((value)>0) ? 1 : 0)
 #define abs_value(a) (((a)<0) ? -(a) : (a))
@@ -60,6 +83,7 @@ LIBDE265_INLINE static int ceil_div(int num,int denom)
   num += denom-1;
   return num/denom;
 }
+
 LIBDE265_INLINE static int ceil_log2(int val)
 {
   int n=0;
@@ -69,6 +93,7 @@ LIBDE265_INLINE static int ceil_log2(int val)
 
   return n;
 }
+
 LIBDE265_INLINE static int Log2(int v)
 {
   int n=0;
@@ -79,6 +104,15 @@ LIBDE265_INLINE static int Log2(int v)
 
   return n;
 }
+
+LIBDE265_INLINE static int Log2SizeToArea(int v)
+{
+  return (1<<(v<<1));
+}
+
+void copy_subimage(uint8_t* dst,int dststride,
+                   const uint8_t* src,int srcstride,
+                   int w, int h);
 
 
 // === logging ===
@@ -95,15 +129,20 @@ enum LogModule {
   LogSEI,
   LogIntraPred,
   LogPixels,
-  LogCABAC
+  LogSymbols,
+  LogCABAC,
+  LogEncoder,
+  NUMBER_OF_LogModules
 };
 
 
 #if defined(DE265_LOG_ERROR) || defined(DE265_LOG_INFO) || defined(DE265_LOG_DEBUG) || defined(DE265_LOG_TRACE)
 # define DE265_LOGGING 1
-void enablelog();
+void enable_logging(enum LogModule);
+void disable_logging(enum LogModule);
 #else
-#define enablelog() { }
+#define enable_logging(x) { }
+#define disable_logging(x) { }
 #endif
 
 #ifdef DE265_LOGGING
@@ -137,5 +176,21 @@ void logtrace(enum LogModule module, const char* string, ...);
 #endif
 
 void log2fh(FILE* fh, const char* string, ...);
+
+
+void printBlk(const char* title,const int16_t* data, int blksize, int stride);
+void printBlk(const char* title,const uint8_t* data, int blksize, int stride);
+
+void debug_set_image_output(void (*)(const struct de265_image*, int slot));
+void debug_show_image(const struct de265_image*, int slot);
+
+typedef std::map<int, bool> bool_1d;
+typedef std::map<int, bool_1d> bool_2d;
+typedef std::map<int, int>    int_1d;
+typedef std::map<int, int_1d> int_2d;
+typedef std::map<int, int_2d> int_3d;
+typedef std::map<int, int_3d> int_4d;
+typedef std::map<int, int_4d> int_5d;
+typedef std::map<int, std::map<int, char>> char_2d;
 
 #endif
