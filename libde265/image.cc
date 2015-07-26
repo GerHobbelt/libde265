@@ -974,13 +974,13 @@ bool de265_image::available_pred_blk(int xC,int yC, int nCbS, int xP, int yP,
   return availableN;
 }
 
-MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
+MotionVectorSpec de265_image::get_mv_info_lower_layer(int x, int y) const
 {
   assert(ilRefPic != NULL);
 
   if (equalPictureSizeAndOffsetFlag) {
     // No scaling necessary
-    return ilRefPic->get_mv_info(xB, yB);
+    return ilRefPic->get_mv_info(x, y);
   }
 
   // Invoke the upsampling process for motion vectors 
@@ -993,12 +993,9 @@ MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
   int ScaledRefRegionHeightInSamplesY = il_scaling_parameters[8];
   int RefLayerRegionHeightInSamplesY  = il_scaling_parameters[9];
 
-  int xPb = xB << 4;
-  int yPb = yB << 4;
-
   // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
-  int xPCtr = xPb + 8;  // (H 65)
-  int yPCtr = yPb + 8;  // (H 66)
+  int xPCtr = x + 8;  // (H 65)
+  int yPCtr = y + 8;  // (H 66)
 
   // 2. The variables xRef and yRef are derived as follows:
   int xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
@@ -1063,24 +1060,21 @@ MotionVectorSpec de265_image::get_mv_info_lower_layer(int xB, int yB) const
   return mv_dst;
 }
 
-PredMode de265_image::get_pred_mode_lower_layer(int xB, int yB) const
+PredMode de265_image::get_pred_mode_lower_layer(int x, int y) const
 {
   assert(ilRefPic != NULL);
 
   if (equalPictureSizeAndOffsetFlag) {
     // No scaling necessary
-    return ilRefPic->get_pred_mode(xB, yB);
+    return ilRefPic->get_pred_mode(x, y);
   }
 
   int PicWidthInSamplesRefLayerY  = ilRefPic->get_width();
   int PicHeightInSamplesRefLayerY = ilRefPic->get_height();
 
-  int xPb = xB << 4;
-  int yPb = yB << 4;
-
   // 1. The center location ( xPCtr, yPCtr ) of the luma prediction block is derived as follows:
-  int xPCtr = xPb + 8;  // (H 65)
-  int yPCtr = yPb + 8;  // (H 66)
+  int xPCtr = x + 8;  // (H 65)
+  int yPCtr = y + 8;  // (H 66)
 
   // 2. The variables xRef and yRef are derived as follows:
   int xRef = (((xPCtr - il_scaling_parameters[0]) * il_scaling_parameters[2] + (1 << 15)) >> 16 ) + il_scaling_parameters[4];  // (H 67)
