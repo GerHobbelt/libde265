@@ -896,7 +896,7 @@ void resampling_process_of_chroma_sample_values_fallback( uint8_t *src, ptrdiff_
 // x_dst and y_dst give the position in the upsampled picture.
 // Output is scaled by 64 (6 bits)
 void resampling_process_of_luma_block_fallback_8bit(
-  const uint8_t *src,  ptrdiff_t src_stride,
+  const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
   int x_dst, int y_dst, const int *position_params)
 {
@@ -959,7 +959,7 @@ void resampling_process_of_luma_block_fallback_8bit(
     tmpSample    = s_tmp;
     xRefBuf = xRef - x_src;
 
-    for (int y = -3; y < dst_heigeht+4; y++) {
+    for (int y = -3; y < src_height+4; y++) {
       tmpSample[x] = (fL[xPhase][0] * rlPicSampleL[ xRefBuf - 3 ] +
                       fL[xPhase][1] * rlPicSampleL[ xRefBuf - 2 ] +
                       fL[xPhase][2] * rlPicSampleL[ xRefBuf - 1 ] +
@@ -1024,7 +1024,7 @@ void resampling_process_of_luma_block_fallback_8bit(
 // x_dst and y_dst give the position in the upsampled picture.
 // Output is scaled by 64 (6 bits)
 void resampling_process_of_chroma_block_fallback_8bit(
-  const uint8_t *src,  ptrdiff_t src_stride,
+  const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
   int x_dst, int y_dst, const int *position_params)
 {
@@ -1088,7 +1088,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
     tmpSample    = s_tmp;
     xRefBuf = xRef - x_src;
 
-    for (int y = -1; y < dst_heigeht+2; y++) {
+    for (int y = -1; y < src_height+2; y++) {
       tmpSample[x] = (fC[xPhase][0] * rlPicSampleC[ xRefBuf - 1 ] +
                       fC[xPhase][1] * rlPicSampleC[ xRefBuf     ] +
                       fC[xPhase][2] * rlPicSampleC[ xRefBuf + 1 ] +
