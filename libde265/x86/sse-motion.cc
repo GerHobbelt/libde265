@@ -4093,6 +4093,10 @@ void ff_hevc_put_hevc_qpel_h_2_v_1_sse(int16_t *dst, ptrdiff_t dststride,
         dst += dststride;
     }
 }
+
+// Half position precision compensation in x and y direction.
+// shift them by 6 bits ( *64 ).
+// Width/height must be from the range [2,4,6,8,12,16,24,32]
 void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
                                        const uint8_t *_src, ptrdiff_t _srcstride, int width, int height,
         int16_t* mcbuffer) {
@@ -4107,15 +4111,21 @@ void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
     r0 = _mm_set_epi8(-1, 4, -11, 40, 40, -11, 4, -1, -1, 4, -11, 40, 40, -11,
             4, -1);
 
+    // Horizontal upsampling
+
     /* LOAD src from memory to registers to limit memory bandwidth */
     if (width == 4) {
 
         for (y = 0; y < height + qpel_extra[2]; y += 2) {
             /* load data in register     */
-            x1 = _mm_loadu_si128((__m128i *) &src[-3]);
+            x1 = _mm_loadu_si128((__m128i *) &src[-3]);          // Load 16 values from src
             src += srcstride;
-            t1 = _mm_loadu_si128((__m128i *) &src[-3]);
-            x2 = _mm_unpacklo_epi64(x1, _mm_srli_si128(x1, 1));
+            t1 = _mm_loadu_si128((__m128i *) &src[-3]);          // Load 16 values from src (next line)
+            
+            // Combine x1 with its shifted version
+            // After this x2=[x1_0 ... x1_7 x1_1 ... x1_8]
+            // ... x3=[x1_2 ... x1_9 x1_3 ... x1_10]
+            x2 = _mm_unpacklo_epi64(x1, _mm_srli_si128(x1, 1));  // 
             t2 = _mm_unpacklo_epi64(t1, _mm_srli_si128(t1, 1));
             x3 = _mm_unpacklo_epi64(_mm_srli_si128(x1, 2),
                     _mm_srli_si128(x1, 3));
@@ -4134,10 +4144,10 @@ void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
             x2 = _mm_srli_epi16(x2, BIT_DEPTH - 8);
             t2 = _mm_srli_epi16(t2, BIT_DEPTH - 8);
             /* give results back            */
-            _mm_storel_epi64((__m128i *) &tmp[0], x2);
+            _mm_storel_epi64((__m128i *) &tmp[0], x2);    // Save 4 16 bit values
 
             tmp += MAX_PB_SIZE;
-            _mm_storel_epi64((__m128i *) &tmp[0], t2);
+            _mm_storel_epi64((__m128i *) &tmp[0], t2);    // Save 4 16 bit values
 
             src += srcstride;
             tmp += MAX_PB_SIZE;
@@ -4146,8 +4156,14 @@ void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
         for (y = 0; y < height + qpel_extra[2]; y++) {
             for (x = 0; x < width; x += 8) {
                 /* load data in register     */
-                x1 = _mm_loadu_si128((__m128i *) &src[x - 3]);
-                x2 = _mm_unpacklo_epi64(x1, _mm_srli_si128(x1, 1));
+                x1 = _mm_loadu_si128((__m128i *) &src[x - 3]);      // Load Load 16 values from src
+                
+                // Combine x1 with shiftet versions of itself
+                // After this x2=x2=[x1_0 ... x1_7 x1_1 ... x1_8]
+                // ... x3=[x1_2 ... x1_9  x1_3 ... x1_10]
+                // ... x4=[x1_4 ... x1_11 x1_5 ... x1_12]
+                // ... x5=[x1_6 ... x1_13 x1_7 ... x1_14]
+                x2 = _mm_unpacklo_epi64(x1, _mm_srli_si128(x1, 1)); 
                 x3 = _mm_unpacklo_epi64(_mm_srli_si128(x1, 2),
                         _mm_srli_si128(x1, 3));
                 x4 = _mm_unpacklo_epi64(_mm_srli_si128(x1, 4),
@@ -4166,7 +4182,7 @@ void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
                 x2 = _mm_srli_si128(x2, BIT_DEPTH - 8);
 
                 /* give results back            */
-                _mm_store_si128((__m128i *) &tmp[x], x2);
+                _mm_store_si128((__m128i *) &tmp[x], x2); // Save 8 16 bit values
 
             }
             src += srcstride;
