@@ -192,25 +192,25 @@ struct acceleration_functions
   // Inter layer upsampling for a block
   void(*resampling_process_of_luma_block_8bit) ( const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                             int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                            int x_dst, int y_dst, const int *position_params);
+                                            int x_dst, int y_dst, const int *position_params, int16_t *buffer);
   void(*resampling_process_of_chroma_block_8bit) ( const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                               int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                              int x_dst, int y_dst, const int *position_params);
+                                              int x_dst, int y_dst, const int *position_params, int16_t *buffer);
 
   void(*resampling_process_of_luma_block_16bit) ( const uint16_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                             int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                            int x_dst, int y_dst, const int *position_params);
+                                            int x_dst, int y_dst, const int *position_params, int16_t *buffer);
   void(*resampling_process_of_chroma_block_16bit) ( const uint16_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                               int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                              int x_dst, int y_dst, const int *position_params);
+                                              int x_dst, int y_dst, const int *position_params, int16_t *buffer);
 
   // Call the correct version of the functions above (according to bit_depth and quarter pel shift)
   void resample_block_luma(const void *src, ptrdiff_t src_stride, int16_t src_height,
                            int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                           int x_dst, int y_dst, const int *position_params, int bit_depth) const ;
+                           int x_dst, int y_dst, const int *position_params, int bit_depth, int16_t *buffer) const ;
   void resample_block_chroma(const void *src, ptrdiff_t src_stride, int16_t src_height,
                              int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                             int x_dst, int y_dst, const int *position_params, int bit_depth) const ;
+                             int x_dst, int y_dst, const int *position_params, int bit_depth, int16_t *buffer) const ;
 };
 
 
@@ -353,22 +353,22 @@ inline void acceleration_functions::put_hevc_qpel(int16_t *dst, ptrdiff_t dststr
 
 inline void acceleration_functions::resample_block_luma(const void *src,  ptrdiff_t src_stride, int16_t src_height,
                                                         int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                        int x_dst, int y_dst, const int *position_params, int bit_depth) const
+                                                        int x_dst, int y_dst, const int *position_params, int bit_depth, int16_t *buffer) const
 {
   if (bit_depth <= 8)
-    resampling_process_of_luma_block_8bit((const uint8_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params);
+    resampling_process_of_luma_block_8bit((const uint8_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params, buffer);
   else
-    resampling_process_of_luma_block_16bit((const uint16_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params);
+    resampling_process_of_luma_block_16bit((const uint16_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params, buffer);
 }
 
 inline void acceleration_functions::resample_block_chroma(const void *src,  ptrdiff_t src_stride, int16_t src_height,
                                                           int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                          int x_dst, int y_dst, const int *position_params, int bit_depth) const
+                                                          int x_dst, int y_dst, const int *position_params, int bit_depth, int16_t *buffer) const
 {
   if (bit_depth <= 8)
-    resampling_process_of_chroma_block_8bit((const uint8_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params);
+    resampling_process_of_chroma_block_8bit((const uint8_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params, buffer);
   else
-    resampling_process_of_chroma_block_16bit((const uint16_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params);
+    resampling_process_of_chroma_block_16bit((const uint16_t*)src, src_stride, src_height, dst, dst_stride, dst_width, dst_height, x_dst, y_dst, position_params, buffer);
 }
 
 template <> inline void acceleration_functions::transform_skip<uint8_t>(uint8_t *dst, const int16_t *coeffs,ptrdiff_t stride, int bit_depth) const { transform_skip_8(dst,coeffs,stride); }

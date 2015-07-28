@@ -85,6 +85,7 @@ vsum = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 4));
 #endif
 
 #define STANDARD_ALIGNMENT 16
+#define MAX_CU_SIZE 64
 
 #ifdef HAVE___MINGW_ALIGNED_MALLOC
 #define ALLOC_ALIGNED(alignment, size)         __mingw_aligned_malloc((size), (alignment))
@@ -151,6 +152,24 @@ ALIGNED_16(const __m64) fL_8bit[16] = { 0x0000004000000000,
                                         0x0001fc0d3cf803ff,
                                         0x0001fd083efb02ff,
                                         0x0001fe043ffd0100 };
+
+ALIGNED_16(const int8_t) fL_8bit_2x[256] = { 0, 0,   0, 64,  0,   0, 0,  0 , 0, 0,   0, 64,  0,   0, 0,  0 ,
+                                             0, 1,  -3, 63,  4,  -2, 1,  0 , 0, 1,  -3, 63,  4,  -2, 1,  0 ,
+                                             1, 2,  -5, 62,  8,  -3, 1,  0 , 1, 2,  -5, 62,  8,  -3, 1,  0 ,
+                                             1, 3,  -8, 60, 13,  -4, 1,  0 , 1, 3,  -8, 60, 13,  -4, 1,  0 ,
+                                             1, 4, -10, 58, 17,  -5, 1,  0 , 1, 4, -10, 58, 17,  -5, 1,  0 ,
+                                             1, 4, -11, 52, 26,  -8, 3, -1 , 1, 4, -11, 52, 26,  -8, 3, -1 ,
+                                             1, 3,  -9, 47, 31, -10, 4, -1 , 1, 3,  -9, 47, 31, -10, 4, -1 ,
+                                             1, 4, -11, 45, 34, -10, 4, -1 , 1, 4, -11, 45, 34, -10, 4, -1 ,
+                                             1, 4, -11, 40, 40, -11, 4, -1 , 1, 4, -11, 40, 40, -11, 4, -1 ,
+                                             1, 4, -10, 34, 45, -11, 4, -1 , 1, 4, -10, 34, 45, -11, 4, -1 ,
+                                             1, 4, -10, 31, 47,  -9, 3, -1 , 1, 4, -10, 31, 47,  -9, 3, -1 ,
+                                             1, 3,  -8, 26, 52, -11, 4, -1 , 1, 3,  -8, 26, 52, -11, 4, -1 ,
+                                             0, 1,  -5, 17, 58, -10, 4, -1 , 0, 1,  -5, 17, 58, -10, 4, -1 ,
+                                             0, 1,  -4, 13, 60,  -8, 3, -1 , 0, 1,  -4, 13, 60,  -8, 3, -1 ,
+                                             0, 1,  -3,  8, 62,  -5, 2, -1 , 0, 1,  -3,  8, 62,  -5, 2, -1 ,
+                                             0, 1,  -2,  4, 63,  -3, 1,  0 , 0, 1,  -2,  4, 63,  -3, 1,  0 };
+
 
 // 16 bit representation of the above filters. Each 16 bits are one coefficient.
 ALIGNED_16(const __m64) fL_16bit[16][2] = { {0x0000000000000040, 0x0000000000000000},
@@ -543,43 +562,296 @@ void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstr
 #endif
 } 
 
+void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
+  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
+  int x_dst, int y_dst, const int *position_params, int16_t *buffer)
+{
+  int BitDepthRefLayerY = position_params[8];
+  int BitDepthCurrY     = position_params[9];
+  int clipMax           = (1 << (BitDepthCurrY)) - 1;
+
+  // 4. The variables shift1, shift2 and offset are derived as follows:
+  int shift1 = BitDepthRefLayerY - 8;  // (H 33)
+  int shift2 = 20 - BitDepthCurrY;     // (H 34)
+  int offset = 1 << (shift2 - 1);      // (H 35)
+
+  int xRef16, xRefBuf, xRef, xPhase, xP;
+  int yRef16, yRefBuf, yRef, yPhase, yP;
+  const uint8_t  *rlPicSampleL;
+  int16_t *rsLumaSample;
+  int16_t  *tmpSample;
+
+  // Calculate the position of the top left point in the reference
+  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
+  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+
+  assert(src_height >= 1);
+  int processing_height = src_height + 7; // padding
+  // Process in y blocks of 8, then process the remainder
+
+  __m128i x0, x1, x2, x3, i0, i1;
+  __m128i filter;
+
+  // Horizontal filtering
+  for (int x=0; x < dst_width; x++) {
+    xP = x_dst + x;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    xRef16 = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2];  // (H 63)
+        
+    // 2. The variables xRef and xPhase are derived as follows:
+    xRef   = xRef16 >> 4;  // (H 29)
+    xPhase = xRef16 % 16;  // (H 30)
+    
+    // Get pointers to source and destination
+    rlPicSampleL = src - 3*src_stride - 3 + xRef;
+    tmpSample    = buffer + x * (MAX_CU_SIZE+8);
+    xRefBuf = xRef - x_src;
+
+    // Load the correct filter accoding to xPhase
+    filter = _mm_load_si128((__m128i *)(fL_8bit_2x + xPhase*16));
+
+    int y, outAddrOffset=0;
+    for (y=processing_height; y >= 8; y-=8, outAddrOffset+=8) {
+
+      // Load 8 y lines
+      
+      // Load 2 8 bit values from two lines and pack 2 into one 128 bits value
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x1 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x2 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x3 = _mm_unpacklo_epi64(i0, i1);
+
+      // Multiply the 4 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      x2 = _mm_maddubs_epi16(x2, filter);
+      x3 = _mm_maddubs_epi16(x3, filter);
+
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x2 = _mm_hadd_epi16(x2, x3);
+      x0 = _mm_hadd_epi16(x0, x2);
+
+      // Save 8 resulting values to tmp
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+
+    // Process the remaining y lines (y lines remaining)
+    if (y == 7) {
+      // Load 7 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x1 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x2 = _mm_unpacklo_epi64(i0, i1);
+
+      x3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      
+      // Multiply the 4 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      x2 = _mm_maddubs_epi16(x2, filter);
+      x3 = _mm_maddubs_epi16(x3, filter);
+
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x2 = _mm_hadd_epi16(x2, x3);
+      x0 = _mm_hadd_epi16(x0, x2);
+
+      // Save 7 resulting values to tmp (last value is 0 but it is written anyways)
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 6) {
+      // Load 6 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x1 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x2 = _mm_unpacklo_epi64(i0, i1);
+
+      // Multiply the 4´3 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      x2 = _mm_maddubs_epi16(x2, filter);
+
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x2 = _mm_hadd_epi16(x2, _mm_setzero_si128());
+      x0 = _mm_hadd_epi16(x0, x2);
+
+      // Save 6 resulting values to tmp (last 2 values are 0 but it is written anyways)
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 5) {
+      // Load 5 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x1 = _mm_unpacklo_epi64(i0, i1);
+
+      x2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+
+      // Multiply the 4´3 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      x2 = _mm_maddubs_epi16(x2, filter);
+
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x2 = _mm_hadd_epi16(x2, _mm_setzero_si128());
+      x0 = _mm_hadd_epi16(x0, x2);
+
+      // Save 5 resulting values to tmp (last 3 values are 0 but it is written anyways)
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 4) {
+      // Load 4 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x1 = _mm_unpacklo_epi64(i0, i1);
+
+      // Multiply the 2 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+
+      // Save 4 resulting values to tmp
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 3) {
+      // Load 3 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      x1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      
+      // Multiply the 2 buffers by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      x1 = _mm_maddubs_epi16(x1, filter);
+      
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, x1);
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+
+      // Save 3 resulting values to tmp (last value is 0 but it is written anyways)
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 2) {
+      // Load 2 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      x0 = _mm_unpacklo_epi64(i0, i1);
+
+      // Multiply the buffer by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+
+      // Save 2 resulting values to tmp (last 2 values are 0 but it is written anyways)
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else if (x == 1) {
+      // Load 1 y lines
+      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      
+      // Multiply the buffer by the double filter
+      x0 = _mm_maddubs_epi16(x0, filter);
+      
+      // Add up results
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+
+      // Save 1 resulting value to tmp (last 3 values are 0 but it is written anyways)
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+    }
+    else
+      assert(false);
+  }
+
+  // Horizontal upsampling done. Perform vertical upsampling.
+  // The temporary buffer (buffer) is flipped (x and y switched).
+  // In this second filtering we will just perform the same flipping again.
+
+  for (int y=0; y< dst_height; y++) {
+    yP = y_dst + y;
+
+    // 1.
+    // H.8.1.4.1.3 Derivation process for reference layer sample location in units of 1/16-th sample
+    // The position_params array contains the precomputed values needed for this.
+    yRef16 = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3];  // (H 64)
+
+    // 3. The variables yRef and yPhase are derived as follows:
+    yPhase = yRef16 % 16;  // (H 32)
+    yRef   = yRef16 >> 4;  // (H 31)
+
+    yRefBuf = yRef - y_src;
 
 
 
-//// The padding/shifting values. Needed for the operation: Shift right and shift in the highest value (padding).
-  //// Shifts from 0-7 are possible. padding0 are the lower 64 bits, padding1 are the upper 64 bits.
-  //__m128i padding_mask; // The mask used for padding (use _mm_shuffle_epi8 with this mask to perform right shift and padding)
-  // padding_mask = _mm_setr_epi64(padding0[shift], padding1[shift]);
-  //__m64 padding1[8] = { 0x0001020304050607,
-  //                      0x0000010203040506,
-  //                      0x0000000102030405,
-  //                      0x0000000001020304,
-  //                      0x0000000000010203,
-  //                      0x0000000000000102,
-  //                      0x0000000000000001,
-  //                      0x0000000000000000
-  //                      /*0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000,
-  //                      0x0000000000000000*/ };
+    //// Get the pointers to the temp buffer for this yP
+    //tmp_minus3 = buffer + (yRefBuf) * MAX_CU_SIZE;
+    //tmp_minus2 = tmp_minus3 + MAX_CU_SIZE;
+    //tmp_minus1 = tmp_minus2 + MAX_CU_SIZE;
+    //tmp_center = tmp_minus1 + MAX_CU_SIZE;
+    //tmp_plus1  = tmp_center + MAX_CU_SIZE;
+    //tmp_plus2  = tmp_plus1  + MAX_CU_SIZE;
+    //tmp_plus3  = tmp_plus2  + MAX_CU_SIZE;
+    //tmp_plus4  = tmp_plus3  + MAX_CU_SIZE;
+    //
+    //// Get pointers to dest buffer
+    //rsLumaSample = dst + y * dst_stride;  // Get pointer to destination y line
 
-  //__m64 padding0[8] = { 0x08090a0b0c0d0e0f,
-  //                      0x0808090a0b0c0d0e,
-  //                      0x080808090a0b0c0d,
-  //                      0x08080808090a0b0c,
-  //                      0x0808080808090a0b,
-  //                      0x080808080808090a,
-  //                      0x0808080808080809,
-  //                      0x0808080808080808
-  //                      /*0x0001020304050607,
-  //                      0x0000010203040506,
-  //                      0x0000000102030405,
-  //                      0x0000000001020304,
-  //                      0x0000000000010203,
-  //                      0x0000000000000102,
-  //                      0x0000000000000001,
-  //                      0x0000000000000000*/ };
+    //for (int x = 0; x < dst_width; x++) {
+    //  rsLumaSample[x] = Clip3( 0, clipMax,
+    //                          (( fL[yPhase][0] * tmp_minus3[ x ] +
+    //                             fL[yPhase][1] * tmp_minus2[ x ] +
+    //                             fL[yPhase][2] * tmp_minus1[ x ] +
+    //                             fL[yPhase][3] * tmp_center[ x ] +
+    //                             fL[yPhase][4] * tmp_plus1 [ x ] +
+    //                             fL[yPhase][5] * tmp_plus2 [ x ] +
+    //                             fL[yPhase][6] * tmp_plus3 [ x ] +
+    //                             fL[yPhase][7] * tmp_plus4 [ x ] + offset ) >> shift2 ));  // (H 39)
+    //  
+    //  rsLumaSample[x] = rsLumaSample[x] << 6; // Scale output by 6 bits
+    //}
+  }
+}

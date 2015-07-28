@@ -26,6 +26,10 @@
 
 void resampling_process_of_luma_sample_values_sse (uint8_t *src, ptrdiff_t srcstride, int src_size[2],
                                                    uint8_t *dst, ptrdiff_t dststride, int dst_size[2],
-                                                   int position_params[10]);
+                                                   int position_params[10], int16_t *buffer);
+
+void resampling_process_of_luma_block_sse_8bit (const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
+                                                int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                int x, int y, const int *position_params, int16_t *buffer);
 
 #endif
