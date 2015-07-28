@@ -286,7 +286,7 @@ void upsample_luma(const base_context* ctx,
   int nPbW_src = xP_right - xP_src;
   int nPbH_src = yP_bottom - yP_src;
 
-  ALIGNED_16(int16_t) upsample_buffer[MAX_CU_SIZE * (MAX_CU_SIZE+7)];
+  ALIGNED_16(int16_t) upsample_buffer[(MAX_CU_SIZE+8) * (MAX_CU_SIZE+7)];   // Plus 7 because of padding, +8 because of SSE save functions aligned to 8bytes.
   
   if (xP_src >= 3 && yP_src >= 3 &&
       xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
