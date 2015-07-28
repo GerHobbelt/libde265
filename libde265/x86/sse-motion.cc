@@ -4111,7 +4111,7 @@ void ff_hevc_put_hevc_qpel_h_2_v_2_sse(int16_t *dst, ptrdiff_t dststride,
     r0 = _mm_set_epi8(-1, 4, -11, 40, 40, -11, 4, -1, -1, 4, -11, 40, 40, -11,
             4, -1);
 
-    // Horizontal upsampling
+    // Horizontal filtering
 
     /* LOAD src from memory to registers to limit memory bandwidth */
     if (width == 4) {
