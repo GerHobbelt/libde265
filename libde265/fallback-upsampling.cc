@@ -920,7 +920,7 @@ void resampling_process_of_luma_block_fallback_8bit(
 
   // Temporal buffer for seperate horizontal/vertical upsampling
   // 3 additional rows on the top, 4 at the bottom.
-  static int16_t s_tmp[(MAX_CU_SIZE+3+4)*MAX_CU_SIZE];
+  int16_t s_tmp[(MAX_CU_SIZE+3+4)*MAX_CU_SIZE];
 
   int BitDepthRefLayerY = position_params[8];
   int BitDepthCurrY     = position_params[9];
@@ -1049,7 +1049,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
 
   // Temporal buffer for seperate horizontal/vertical upsampling
   // 1 additional rows on the top, 2 at the bottom.
-  static int16_t s_tmp[((MAX_CU_SIZE/2)+1+2)*(MAX_CU_SIZE/2)];
+  int16_t s_tmp[((MAX_CU_SIZE/2)+1+2)*(MAX_CU_SIZE/2)];
 
   int BitDepthRefLayerC = position_params[8];
   int BitDepthCurrC     = position_params[9];
