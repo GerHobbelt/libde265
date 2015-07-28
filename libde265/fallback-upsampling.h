@@ -36,16 +36,16 @@ void resampling_process_of_chroma_sample_values_fallback (uint8_t *src, ptrdiff_
 // (So src-4 and src-4*src_stride must be accessable)
 void resampling_process_of_luma_block_fallback_8bit (const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                                      int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                     int x, int y, const int *position_params);
+                                                     int x, int y, const int *position_params, int16_t *buffer);
 void resampling_process_of_luma_block_fallback_16bit (const uint16_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                                      int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                     int x, int y, const int *position_params);
+                                                     int x, int y, const int *position_params, int16_t *buffer);
 void resampling_process_of_chroma_block_fallback_8bit (const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                                        int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                       int x, int y, const int *position_params);
+                                                       int x, int y, const int *position_params, int16_t *buffer);
 void resampling_process_of_chroma_block_fallback_16bit (const uint16_t *src,  ptrdiff_t src_stride, int16_t src_height,
                                                        int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-                                                       int x, int y, const int *position_params);
+                                                       int x, int y, const int *position_params, int16_t *buffer);
 
 
 #endif

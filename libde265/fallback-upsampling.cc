@@ -898,7 +898,7 @@ void resampling_process_of_chroma_sample_values_fallback( uint8_t *src, ptrdiff_
 void resampling_process_of_luma_block_fallback_8bit(
   const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-  int x_dst, int y_dst, const int *position_params)
+  int x_dst, int y_dst, const int *position_params, int16_t *buffer)
 {
   // Table H.1 – 16-phase luma resampling filter
   static const int fL[16][8] = {  { 0, 0,   0, 64,  0,   0, 0,  0},
@@ -917,10 +917,6 @@ void resampling_process_of_luma_block_fallback_8bit(
                                   { 0, 1,  -4, 13, 60,  -8, 3, -1},
                                   { 0, 1,  -3,  8, 62,  -5, 2, -1},
                                   { 0, 1,  -2,  4, 63,  -3, 1,  0} };
-
-  // Temporal buffer for seperate horizontal/vertical upsampling
-  // 3 additional rows on the top, 4 at the bottom.
-  int16_t s_tmp[(MAX_CU_SIZE+3+4)*MAX_CU_SIZE];
 
   int BitDepthRefLayerY = position_params[8];
   int BitDepthCurrY     = position_params[9];
@@ -956,7 +952,7 @@ void resampling_process_of_luma_block_fallback_8bit(
     
     // Get pointers to source and destination
     rlPicSampleL = src - 3*src_stride;
-    tmpSample    = s_tmp;
+    tmpSample    = buffer;
     xRefBuf = xRef - x_src;
 
     for (int y = -3; y < src_height+4; y++) {
@@ -992,7 +988,7 @@ void resampling_process_of_luma_block_fallback_8bit(
     yRefBuf = yRef - y_src;
 
     // Get the pointers to the temp buffer for this yP
-    tmp_minus3 = s_tmp + (yRefBuf) * MAX_CU_SIZE;
+    tmp_minus3 = buffer + (yRefBuf) * MAX_CU_SIZE;
     tmp_minus2 = tmp_minus3 + MAX_CU_SIZE;
     tmp_minus1 = tmp_minus2 + MAX_CU_SIZE;
     tmp_center = tmp_minus1 + MAX_CU_SIZE;
@@ -1026,7 +1022,7 @@ void resampling_process_of_luma_block_fallback_8bit(
 void resampling_process_of_chroma_block_fallback_8bit(
   const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
   int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
-  int x_dst, int y_dst, const int *position_params)
+  int x_dst, int y_dst, const int *position_params, int16_t *buffer)
 {
   // Table H.2 – 16-phase chroma resampling filter
   static const int fC[16][4] = 
@@ -1046,10 +1042,6 @@ void resampling_process_of_chroma_block_fallback_8bit(
                     {-2, 14, 56, -4},
                     {-2, 10, 58, -2},
                     { 0,  4, 62, -2} };
-
-  // Temporal buffer for seperate horizontal/vertical upsampling
-  // 1 additional rows on the top, 2 at the bottom.
-  int16_t s_tmp[((MAX_CU_SIZE/2)+1+2)*(MAX_CU_SIZE/2)];
 
   int BitDepthRefLayerC = position_params[8];
   int BitDepthCurrC     = position_params[9];
@@ -1085,7 +1077,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
     
     // Get pointers to source and destination
     rlPicSampleC = src - (1*src_stride);
-    tmpSample    = s_tmp;
+    tmpSample    = buffer;
     xRefBuf = xRef - x_src;
 
     for (int y = -1; y < src_height+3; y++) {
@@ -1117,7 +1109,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
 
     // Get the pointers to the temp buffer for this yP
     yRefBuf = yRef - y_src;
-    tmp_minus1 = s_tmp + yRefBuf * (MAX_CU_SIZE/2);
+    tmp_minus1 = buffer + yRefBuf * (MAX_CU_SIZE/2);
     tmp_center = tmp_minus1  + (MAX_CU_SIZE/2);
     tmp_plus1  = tmp_center  + (MAX_CU_SIZE/2);
     tmp_plus2  = tmp_plus1   + (MAX_CU_SIZE/2);

@@ -285,11 +285,13 @@ void upsample_luma(const base_context* ctx,
   int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
   int nPbW_src = xP_right - xP_src;
   int nPbH_src = yP_bottom - yP_src;
+
+  ALIGNED_16(int16_t) upsample_buffer[MAX_CU_SIZE * (MAX_CU_SIZE+7)];
   
   if (xP_src >= 3 && yP_src >= 3 &&
       xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
     // The block to upsample is entirely within the reference picture (no clipping required)
-    ctx->acceleration.resample_block_luma(&ref[yP_src*ref_stride + xP_src], ref_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
+    ctx->acceleration.resample_block_luma(&ref[yP_src*ref_stride + xP_src], ref_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L, upsample_buffer);
     
     // Upsample the block ref to mcbuffer
     //printf("Upsample Pos(%i,%i)\n", xP, yP);
@@ -318,7 +320,7 @@ void upsample_luma(const base_context* ctx,
 
     // Resample from the padding buffer to output
     const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
-    ctx->acceleration.resample_block_luma(pad_ptr, pad_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L);
+    ctx->acceleration.resample_block_luma(pad_ptr, pad_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L, upsample_buffer);
 
     //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
 
@@ -377,13 +379,15 @@ void upsample_chroma(const base_context* ctx,
   int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
   int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
 
+  ALIGNED_16(int16_t) upsample_buffer[MAX_CU_SIZE/2 * (MAX_CU_SIZE/2+3)];
+
   int nPbW_src = xP_right - xP_src;
   int nPbH_src = yP_bottom - yP_src;
 
   if (xP_src >= 1 && yP_src >= 1 &&
       xP_right+2 <= ref_pic_width_in_chroma_samples && yP_bottom+2 <= ref_pic_height_in_chroma_samples) {
     // The block to upsample is entirely within the picture (no clipping required)
-    ctx->acceleration.resample_block_chroma(&ref[yP_src*ref_stride + xP_src], ref_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+    ctx->acceleration.resample_block_chroma(&ref[yP_src*ref_stride + xP_src], ref_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C, upsample_buffer);
     
     // Upsample the block ref to mcbuffer
     //printf("C: Upsample Pos(%i,%i)\n", xP, yP);
@@ -411,7 +415,7 @@ void upsample_chroma(const base_context* ctx,
 
     // Resample from the padding buffer to output
     const pixel_t* pad_ptr = &padbuf[extra_top*pad_stride + extra_left];
-    ctx->acceleration.resample_block_chroma(pad_ptr, pad_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C);
+    ctx->acceleration.resample_block_chroma(pad_ptr, pad_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_C, upsample_buffer);
 
     //printf("Upsample Pad Pos(%i,%i)\n", xP, yP);
 
