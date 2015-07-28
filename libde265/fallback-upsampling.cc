@@ -897,7 +897,7 @@ void resampling_process_of_chroma_sample_values_fallback( uint8_t *src, ptrdiff_
 // Output is scaled by 64 (6 bits)
 void resampling_process_of_luma_block_fallback_8bit(
   const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
-  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
   int x_dst, int y_dst, const int *position_params)
 {
   // Table H.1 – 16-phase luma resampling filter
@@ -977,7 +977,7 @@ void resampling_process_of_luma_block_fallback_8bit(
 
   // Vertical upsampling
   int16_t *tmp_minus3, *tmp_minus2, *tmp_minus1, *tmp_center, *tmp_plus1, *tmp_plus2, *tmp_plus3, *tmp_plus4;
-  for (int y=0; y< dst_heigeht; y++) {
+  for (int y=0; y< dst_height; y++) {
     yP = y_dst + y;
 
     // 1.
@@ -1025,7 +1025,7 @@ void resampling_process_of_luma_block_fallback_8bit(
 // Output is scaled by 64 (6 bits)
 void resampling_process_of_chroma_block_fallback_8bit(
   const uint8_t *src,  ptrdiff_t src_stride, int16_t src_height,
-  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+  int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
   int x_dst, int y_dst, const int *position_params)
 {
   // Table H.2 – 16-phase chroma resampling filter
@@ -1088,7 +1088,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
     tmpSample    = s_tmp;
     xRefBuf = xRef - x_src;
 
-    for (int y = -1; y < src_height+2; y++) {
+    for (int y = -1; y < src_height+3; y++) {
       tmpSample[x] = (fC[xPhase][0] * rlPicSampleC[ xRefBuf - 1 ] +
                       fC[xPhase][1] * rlPicSampleC[ xRefBuf     ] +
                       fC[xPhase][2] * rlPicSampleC[ xRefBuf + 1 ] +
@@ -1102,7 +1102,7 @@ void resampling_process_of_chroma_block_fallback_8bit(
 
   // Vertical upsampling
   int16_t *tmp_minus1, *tmp_center, *tmp_plus1, *tmp_plus2;
-  for (int y=0; y< dst_heigeht; y++) {
+  for (int y=0; y< dst_height; y++) {
     yP = y_dst + y;
 
     // 1.
