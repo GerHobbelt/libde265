@@ -44,7 +44,7 @@ r1 := (imm == 1) ? b : a1;
 ...
 r7 := (imm == 7) ? b : a7;
 
-- _mm_maddubs_epi16 : multiplies and adds integers. (16*8bit unsigned, 16*8bit signed) (SSSE3)
+- _mm_maddubs_epi1 6_mm_maddubs_epi16: multiplies and adds integers. (16*8bit unsigned, 16*8bit signed) (SSSE3)
 r0 := SATURATE_16((a0 * b0) + (a1 * b1))
 r1 := SATURATE_16((a2 * b2) + (a3 * b3))
 ...
@@ -153,41 +153,41 @@ ALIGNED_16(const __m64) fL_8bit[16] = { 0x0000004000000000,
                                         0x0001fd083efb02ff,
                                         0x0001fe043ffd0100 };
 
-ALIGNED_16(const int8_t) fL_8bit_2x[256] = { 0, 0,   0, 64,  0,   0, 0,  0 , 0, 0,   0, 64,  0,   0, 0,  0 ,
-                                             0, 1,  -3, 63,  4,  -2, 1,  0 , 0, 1,  -3, 63,  4,  -2, 1,  0 ,
-                                             1, 2,  -5, 62,  8,  -3, 1,  0 , 1, 2,  -5, 62,  8,  -3, 1,  0 ,
-                                             1, 3,  -8, 60, 13,  -4, 1,  0 , 1, 3,  -8, 60, 13,  -4, 1,  0 ,
-                                             1, 4, -10, 58, 17,  -5, 1,  0 , 1, 4, -10, 58, 17,  -5, 1,  0 ,
-                                             1, 4, -11, 52, 26,  -8, 3, -1 , 1, 4, -11, 52, 26,  -8, 3, -1 ,
-                                             1, 3,  -9, 47, 31, -10, 4, -1 , 1, 3,  -9, 47, 31, -10, 4, -1 ,
-                                             1, 4, -11, 45, 34, -10, 4, -1 , 1, 4, -11, 45, 34, -10, 4, -1 ,
-                                             1, 4, -11, 40, 40, -11, 4, -1 , 1, 4, -11, 40, 40, -11, 4, -1 ,
-                                             1, 4, -10, 34, 45, -11, 4, -1 , 1, 4, -10, 34, 45, -11, 4, -1 ,
-                                             1, 4, -10, 31, 47,  -9, 3, -1 , 1, 4, -10, 31, 47,  -9, 3, -1 ,
-                                             1, 3,  -8, 26, 52, -11, 4, -1 , 1, 3,  -8, 26, 52, -11, 4, -1 ,
-                                             0, 1,  -5, 17, 58, -10, 4, -1 , 0, 1,  -5, 17, 58, -10, 4, -1 ,
-                                             0, 1,  -4, 13, 60,  -8, 3, -1 , 0, 1,  -4, 13, 60,  -8, 3, -1 ,
-                                             0, 1,  -3,  8, 62,  -5, 2, -1 , 0, 1,  -3,  8, 62,  -5, 2, -1 ,
-                                             0, 1,  -2,  4, 63,  -3, 1,  0 , 0, 1,  -2,  4, 63,  -3, 1,  0 };
+// The filters in 8 bit fromat. 2 times the same filter to perform 2 multiplications with the filter at once.
+ALIGNED_16(const int8_t) fL_8bit_2x[256] = {  0, 0,   0, 64,  0,   0, 0,  0 ,  0, 0,   0, 64,  0,   0, 0,  0 ,
+                                              0, 1,  -3, 63,  4,  -2, 1,  0 ,  0, 1,  -3, 63,  4,  -2, 1,  0 ,
+                                             -1, 2,  -5, 62,  8,  -3, 1,  0 , -1, 2,  -5, 62,  8,  -3, 1,  0 ,
+                                             -1, 3,  -8, 60, 13,  -4, 1,  0 , -1, 3,  -8, 60, 13,  -4, 1,  0 ,
+                                             -1, 4, -10, 58, 17,  -5, 1,  0 , -1, 4, -10, 58, 17,  -5, 1,  0 ,
+                                             -1, 4, -11, 52, 26,  -8, 3, -1 , -1, 4, -11, 52, 26,  -8, 3, -1 ,
+                                             -1, 3,  -9, 47, 31, -10, 4, -1 , -1, 3,  -9, 47, 31, -10, 4, -1 ,
+                                             -1, 4, -11, 45, 34, -10, 4, -1 , -1, 4, -11, 45, 34, -10, 4, -1 ,
+                                             -1, 4, -11, 40, 40, -11, 4, -1 , -1, 4, -11, 40, 40, -11, 4, -1 ,
+                                             -1, 4, -10, 34, 45, -11, 4, -1 , -1, 4, -10, 34, 45, -11, 4, -1 ,
+                                             -1, 4, -10, 31, 47,  -9, 3, -1 , -1, 4, -10, 31, 47,  -9, 3, -1 ,
+                                             -1, 3,  -8, 26, 52, -11, 4, -1 , -1, 3,  -8, 26, 52, -11, 4, -1 ,
+                                              0, 1,  -5, 17, 58, -10, 4, -1 ,  0, 1,  -5, 17, 58, -10, 4, -1 ,
+                                              0, 1,  -4, 13, 60,  -8, 3, -1 ,  0, 1,  -4, 13, 60,  -8, 3, -1 ,
+                                              0, 1,  -3,  8, 62,  -5, 2, -1 ,  0, 1,  -3,  8, 62,  -5, 2, -1 ,
+                                              0, 1,  -2,  4, 63,  -3, 1,  0 ,  0, 1,  -2,  4, 63,  -3, 1,  0 };
 
-
-// 16 bit representation of the above filters. Each 16 bits are one coefficient.
-ALIGNED_16(const __m64) fL_16bit[16][2] = { {0x0000000000000040, 0x0000000000000000},
-                                            {0x00000001fffd003f, 0x0004fffe00010000},
-                                            {0xffff0002fffb003e, 0x0008fffd00010000},
-                                            {0xffff0003fff8003c, 0x000dfffc00010000},
-                                            {0xffff0004fff6003a, 0x0011fffb00010000},
-                                            {0xffff0004fff50034, 0x001afff80003ffff},
-                                            {0xffff0003fff7002f, 0x001ffff60004ffff},
-                                            {0xffff0004fff5002d, 0x0022fff60004ffff},
-                                            {0xffff0004fff50028, 0x0028fff50004ffff},
-                                            {0xffff0004fff60022, 0x002dfff50004ffff},
-                                            {0xffff0004fff6001f, 0x002ffff70003ffff},
-                                            {0xffff0003fff8001a, 0x0034fff50004ffff},
-                                            {0x00000001fffb0011, 0x003afff60004ffff},
-                                            {0x00000001fffc000d, 0x003cfff80003ffff},
-                                            {0x00000001fffd0008, 0x003efffb0002ffff},
-                                            {0x00000001fffe0004, 0x003ffffd00010000} };
+// The filters in 16 bit format. Every line is one filter.
+ALIGNED_16(const int16_t) fL_16bit[128] = {  0, 0,   0, 64,  0,   0, 0,  0 ,
+                                             0, 1,  -3, 63,  4,  -2, 1,  0 ,
+                                            -1, 2,  -5, 62,  8,  -3, 1,  0 ,
+                                            -1, 3,  -8, 60, 13,  -4, 1,  0 ,
+                                            -1, 4, -10, 58, 17,  -5, 1,  0 ,
+                                            -1, 4, -11, 52, 26,  -8, 3, -1 ,
+                                            -1, 3,  -9, 47, 31, -10, 4, -1 ,
+                                            -1, 4, -11, 45, 34, -10, 4, -1 ,
+                                            -1, 4, -11, 40, 40, -11, 4, -1 ,
+                                            -1, 4, -10, 34, 45, -11, 4, -1 ,
+                                            -1, 4, -10, 31, 47,  -9, 3, -1 ,
+                                            -1, 3,  -8, 26, 52, -11, 4, -1 ,
+                                             0, 1,  -5, 17, 58, -10, 4, -1 ,
+                                             0, 1,  -4, 13, 60,  -8, 3, -1 ,
+                                             0, 1,  -3,  8, 62,  -5, 2, -1 ,
+                                             0, 1,  -2,  4, 63,  -3, 1,  0 };
 
 // Measure the execution time of the upsampling and print it to stdout
 #define MEASURE_EXECUTION_TIME 0
@@ -386,7 +386,7 @@ void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstr
       lastTicks1 = rdtsc();
 #endif
       // Get the correct filter (according to xPhase)
-      filter = _mm_setr_epi64(fL_8bit[xPhase], fL_8bit[xPhase]);
+      filter = _mm_load_si128((__m128i *)(fL_16bit + xPhase * 8));
 
       // multiply
       result = _mm_maddubs_epi16(in, filter);
@@ -498,7 +498,7 @@ void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstr
 #endif
 
       // Get the correct filter (according to yPhase)
-      filter = _mm_setr_epi64(fL_16bit[yPhase][1], fL_16bit[yPhase][0]);
+      filter = _mm_load_si128((__m128i *)(fL_16bit + xPhase * 8));
 
       // multiply (16 bit input, out 32bit)
       result = _mm_madd_epi16 (in, filter);
@@ -568,12 +568,12 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
 {
   int BitDepthRefLayerY = position_params[8];
   int BitDepthCurrY     = position_params[9];
-  int clipMax           = (1 << (BitDepthCurrY)) - 1;
+  
+  // As the function name indicates this function can only upsample from 8bit to 8bit
+  assert(BitDepthRefLayerY == 8);
+  assert(BitDepthCurrY == 8);
 
-  // 4. The variables shift1, shift2 and offset are derived as follows:
-  int shift1 = BitDepthRefLayerY - 8;  // (H 33)
-  int shift2 = 20 - BitDepthCurrY;     // (H 34)
-  int offset = 1 << (shift2 - 1);      // (H 35)
+  int clipMax           = (1 << (BitDepthCurrY)) - 1;
 
   int xRef16, xRefBuf, xRef, xPhase, xP;
   int yRef16, yRefBuf, yRef, yPhase, yP;
@@ -586,10 +586,10 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
   int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
 
   assert(src_height >= 1);
-  int processing_height = src_height + 7; // padding
+  int processing_height = src_height + 3 + 4; // padding (3 on left, 4 on right)
   // Process in y blocks of 8, then process the remainder
 
-  __m128i x0, x1, x2, x3, i0, i1;
+  __m128i r0, r1, r2, r3, r4, r5, r6, r7, r8;
   __m128i filter;
 
   // Horizontal filtering
@@ -606,10 +606,10 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
     xPhase = xRef16 % 16;  // (H 30)
     
     // Get pointers to source and destination
-    rlPicSampleL = src - 3*src_stride - 3 + xRef;
-    tmpSample    = buffer + x * (MAX_CU_SIZE+8);
     xRefBuf = xRef - x_src;
-
+    rlPicSampleL = src - 3*src_stride - 3 + xRefBuf;
+    tmpSample    = buffer + x * (MAX_CU_SIZE+8);
+    
     // Load the correct filter accoding to xPhase
     filter = _mm_load_si128((__m128i *)(fL_8bit_2x + xPhase*16));
 
@@ -619,199 +619,206 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       // Load 8 y lines
       
       // Load 2 8 bit values from two lines and pack 2 into one 128 bits value
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x1 = _mm_unpacklo_epi64(i0, i1);
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_unpacklo_epi64(r1, r2);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x2 = _mm_unpacklo_epi64(i0, i1);
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_unpacklo_epi64(r2, r3);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x3 = _mm_unpacklo_epi64(i0, i1);
+      r3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r4 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r3 = _mm_unpacklo_epi64(r3, r4);
 
       // Multiply the 4 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
-      x2 = _mm_maddubs_epi16(x2, filter);
-      x3 = _mm_maddubs_epi16(x3, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
+      r2 = _mm_maddubs_epi16(r2, filter);
+      r3 = _mm_maddubs_epi16(r3, filter);
 
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x2 = _mm_hadd_epi16(x2, x3);
-      x0 = _mm_hadd_epi16(x0, x2);
+      r0 = _mm_hadd_epi16(r0, r1);
+      r2 = _mm_hadd_epi16(r2, r3);
+      r0 = _mm_hadd_epi16(r0, r2);
 
       // Save 8 resulting values to tmp
-      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), r0);
     }
 
     // Process the remaining y lines (y lines remaining)
     if (y == 7) {
       // Load 7 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x1 = _mm_unpacklo_epi64(i0, i1);
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_unpacklo_epi64(r1, r2);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x2 = _mm_unpacklo_epi64(i0, i1);
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_unpacklo_epi64(r2, r3);
 
-      x3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
       
       // Multiply the 4 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
-      x2 = _mm_maddubs_epi16(x2, filter);
-      x3 = _mm_maddubs_epi16(x3, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
+      r2 = _mm_maddubs_epi16(r2, filter);
+      r3 = _mm_maddubs_epi16(r3, filter);
 
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x2 = _mm_hadd_epi16(x2, x3);
-      x0 = _mm_hadd_epi16(x0, x2);
+      r0 = _mm_hadd_epi16(r0, r1);
+      r2 = _mm_hadd_epi16(r2, r3);
+      r0 = _mm_hadd_epi16(r0, r2);
 
       // Save 7 resulting values to tmp (last value is 0 but it is written anyways)
-      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 6) {
+    else if (y == 6) {
       // Load 6 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x1 = _mm_unpacklo_epi64(i0, i1);
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_unpacklo_epi64(r1, r2);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x2 = _mm_unpacklo_epi64(i0, i1);
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r3 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_unpacklo_epi64(r2, r3);
 
       // Multiply the 4´3 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
-      x2 = _mm_maddubs_epi16(x2, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
+      r2 = _mm_maddubs_epi16(r2, filter);
 
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x2 = _mm_hadd_epi16(x2, _mm_setzero_si128());
-      x0 = _mm_hadd_epi16(x0, x2);
+      r0 = _mm_hadd_epi16(r0, r1);
+      r2 = _mm_hadd_epi16(r2, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, r2);
 
       // Save 6 resulting values to tmp (last 2 values are 0 but it is written anyways)
-      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 5) {
+    else if (y == 5) {
       // Load 5 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x1 = _mm_unpacklo_epi64(i0, i1);
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_unpacklo_epi64(r1, r2);
 
-      x2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
 
       // Multiply the 4´3 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
-      x2 = _mm_maddubs_epi16(x2, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
+      r2 = _mm_maddubs_epi16(r2, filter);
 
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x2 = _mm_hadd_epi16(x2, _mm_setzero_si128());
-      x0 = _mm_hadd_epi16(x0, x2);
+      r0 = _mm_hadd_epi16(r0, r1);
+      r2 = _mm_hadd_epi16(r2, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, r2);
 
       // Save 5 resulting values to tmp (last 3 values are 0 but it is written anyways)
-      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_store_si128((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 4) {
+    else if (y == 4) {
       // Load 4 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x1 = _mm_unpacklo_epi64(i0, i1);
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r2 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_unpacklo_epi64(r1, r2);
 
       // Multiply the 2 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
       
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, r1);
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
 
       // Save 4 resulting values to tmp
-      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 3) {
+    else if (y == 3) {
       // Load 3 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
-      x1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
       
       // Multiply the 2 buffers by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
-      x1 = _mm_maddubs_epi16(x1, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
+      r1 = _mm_maddubs_epi16(r1, filter);
       
       // Add up results
-      x0 = _mm_hadd_epi16(x0, x1);
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, r1);
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
 
       // Save 3 resulting values to tmp (last value is 0 but it is written anyways)
-      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 2) {
+    else if (y == 2) {
       // Load 2 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      i1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
-      x0 = _mm_unpacklo_epi64(i0, i1);
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r1 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, r1);
 
       // Multiply the buffer by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
       
       // Add up results
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
 
       // Save 2 resulting values to tmp (last 2 values are 0 but it is written anyways)
-      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), r0);
     }
-    else if (x == 1) {
+    else if (y == 1) {
       // Load 1 y lines
-      i0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_loadl_epi64((__m128i *)rlPicSampleL);    rlPicSampleL += src_stride;
+      r0 = _mm_unpacklo_epi64(r0, _mm_setzero_si128());
       
       // Multiply the buffer by the double filter
-      x0 = _mm_maddubs_epi16(x0, filter);
+      r0 = _mm_maddubs_epi16(r0, filter);
       
       // Add up results
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
-      x0 = _mm_hadd_epi16(x0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());
 
       // Save 1 resulting value to tmp (last 3 values are 0 but it is written anyways)
-      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), x0);
+      _mm_storel_epi64((__m128i*) (tmpSample+outAddrOffset), r0);
     }
     else
-      assert(false);
+      assert(y==0);
   }
 
   // Horizontal upsampling done. Perform vertical upsampling.
   // The temporary buffer (buffer) is flipped (x and y switched).
   // In this second filtering we will just perform the same flipping again.
+  
+  // 4. The variables shift1, shift2 and offset are derived as follows:
+  //int shift2 = 12;     // (20 - BitDepthCurrY)  (H 34)
+  //int offset = 2048;   // (1 << (shift2 - 1))   (H 35)
+  __m128i offset = _mm_set_epi32(2048, 2048, 2048, 2048);
 
-  for (int y=0; y< dst_height; y++) {
+  int16_t *out;
+  for (int y = 0; y < dst_height; y++) {
     yP = y_dst + y;
 
     // 1.
@@ -823,35 +830,295 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
     yPhase = yRef16 % 16;  // (H 32)
     yRef   = yRef16 >> 4;  // (H 31)
 
+    
+    // Get pointer to source and destination
     yRefBuf = yRef - y_src;
+    tmpSample = buffer + yRefBuf;
+    out = dst + y * dst_stride;
 
+    
+    // Load the correct filter accoding to xPhase
+    filter = _mm_load_si128((__m128i *)(fL_16bit + yPhase * 8));
 
+    int x, outAddrOffset = 0;
+    for (x = dst_width; x >= 8; x -= 8, outAddrOffset += 8) {
 
-    //// Get the pointers to the temp buffer for this yP
-    //tmp_minus3 = buffer + (yRefBuf) * MAX_CU_SIZE;
-    //tmp_minus2 = tmp_minus3 + MAX_CU_SIZE;
-    //tmp_minus1 = tmp_minus2 + MAX_CU_SIZE;
-    //tmp_center = tmp_minus1 + MAX_CU_SIZE;
-    //tmp_plus1  = tmp_center + MAX_CU_SIZE;
-    //tmp_plus2  = tmp_plus1  + MAX_CU_SIZE;
-    //tmp_plus3  = tmp_plus2  + MAX_CU_SIZE;
-    //tmp_plus4  = tmp_plus3  + MAX_CU_SIZE;
-    //
-    //// Get pointers to dest buffer
-    //rsLumaSample = dst + y * dst_stride;  // Get pointer to destination y line
+      // Load 8 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r3 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r4 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r5 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r6 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r7 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
 
-    //for (int x = 0; x < dst_width; x++) {
-    //  rsLumaSample[x] = Clip3( 0, clipMax,
-    //                          (( fL[yPhase][0] * tmp_minus3[ x ] +
-    //                             fL[yPhase][1] * tmp_minus2[ x ] +
-    //                             fL[yPhase][2] * tmp_minus1[ x ] +
-    //                             fL[yPhase][3] * tmp_center[ x ] +
-    //                             fL[yPhase][4] * tmp_plus1 [ x ] +
-    //                             fL[yPhase][5] * tmp_plus2 [ x ] +
-    //                             fL[yPhase][6] * tmp_plus3 [ x ] +
-    //                             fL[yPhase][7] * tmp_plus4 [ x ] + offset ) >> shift2 ));  // (H 39)
-    //  
-    //  rsLumaSample[x] = rsLumaSample[x] << 6; // Scale output by 6 bits
-    //}
+      // Multiply the 8 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16 (r0, filter);
+      r1 = _mm_madd_epi16 (r1, filter);
+      r2 = _mm_madd_epi16 (r2, filter);
+      r3 = _mm_madd_epi16 (r3, filter);
+      r4 = _mm_madd_epi16 (r4, filter);
+      r5 = _mm_madd_epi16 (r5, filter);
+      r6 = _mm_madd_epi16 (r6, filter);
+      r7 = _mm_madd_epi16 (r7, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, r3);
+      r4 = _mm_hadd_epi32(r4, r5);
+      r6 = _mm_hadd_epi32(r6, r7);
+
+      r0 = _mm_hadd_epi32(r0, r2);
+      r4 = _mm_hadd_epi32(r4, r6);
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      r4 = _mm_add_epi32(r4, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      r4 = _mm_srli_epi32(r4, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+      r4 = _mm_slli_epi32(r4, 6);
+
+      r0 = _mm_hadd_epi16(r0, r4);  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 8 resulting values to dst
+      _mm_store_si128((__m128i*) (out + outAddrOffset), r0);
+    }
+    // Process the remaining x lines (x lines remaining)
+    if (x == 7) {
+      // Load 7 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r3 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r4 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r5 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r6 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 7 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+      r2 = _mm_madd_epi16(r2, filter);
+      r3 = _mm_madd_epi16(r3, filter);
+      r4 = _mm_madd_epi16(r4, filter);
+      r5 = _mm_madd_epi16(r5, filter);
+      r6 = _mm_madd_epi16(r6, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, r3);
+      r4 = _mm_hadd_epi32(r4, r5);
+      r6 = _mm_hadd_epi32(r6, _mm_setzero_si128());
+
+      r0 = _mm_hadd_epi32(r0, r2);
+      r4 = _mm_hadd_epi32(r4, r6);
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      r4 = _mm_add_epi32(r4, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      r4 = _mm_srli_epi32(r4, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+      r4 = _mm_slli_epi32(r4, 6);
+
+      r0 = _mm_hadd_epi16(r0, r4);  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 8 resulting values to dst. The last value is 0.
+      _mm_store_si128((__m128i*) (out + outAddrOffset), r0);
+    }
+    else if (x == 6) {
+      // Load 6 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r3 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r4 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r5 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 6 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+      r2 = _mm_madd_epi16(r2, filter);
+      r3 = _mm_madd_epi16(r3, filter);
+      r4 = _mm_madd_epi16(r4, filter);
+      r5 = _mm_madd_epi16(r5, filter);
+      
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, r3);
+      r4 = _mm_hadd_epi32(r4, r5);
+      
+      r0 = _mm_hadd_epi32(r0, r2);
+      r4 = _mm_hadd_epi32(r4, _mm_setzero_si128());
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      r4 = _mm_add_epi32(r4, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      r4 = _mm_srli_epi32(r4, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+      r4 = _mm_slli_epi32(r4, 6);
+
+      r0 = _mm_hadd_epi16(r0, r4);  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 8 resulting values to dst. The last 2 values are 0.
+      _mm_store_si128((__m128i*) (out + outAddrOffset), r0);
+    }
+    else if (x == 5) {
+      // Load 5 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r3 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r4 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 5 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+      r2 = _mm_madd_epi16(r2, filter);
+      r3 = _mm_madd_epi16(r3, filter);
+      r4 = _mm_madd_epi16(r4, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, r3);
+      r4 = _mm_hadd_epi32(r4, _mm_setzero_si128());
+
+      r0 = _mm_hadd_epi32(r0, r2);
+      r4 = _mm_hadd_epi32(r4, _mm_setzero_si128());
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      r4 = _mm_add_epi32(r4, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      r4 = _mm_srli_epi32(r4, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+      r4 = _mm_slli_epi32(r4, 6);
+
+      r0 = _mm_hadd_epi16(r0, r4);  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 8 resulting values to dst. The last 3 values are 0.
+      _mm_store_si128((__m128i*) (out + outAddrOffset), r0);
+    }
+    else if (x == 4) {
+      // Load 4 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r3 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 4 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+      r2 = _mm_madd_epi16(r2, filter);
+      r3 = _mm_madd_epi16(r3, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, r3);
+
+      r0 = _mm_hadd_epi32(r0, r2);
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 4 resulting values to dst.
+      _mm_storel_epi64((__m128i*) (out + outAddrOffset), r0);
+
+    }
+    else if (x == 3) {
+      // Load 3 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r2 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 3 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+      r2 = _mm_madd_epi16(r2, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r2 = _mm_hadd_epi32(r2, _mm_setzero_si128());
+
+      r0 = _mm_hadd_epi32(r0, r2);
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 4 resulting values to dst. The last value is 0.
+      _mm_storel_epi64((__m128i*) (out + outAddrOffset), r0);
+    }
+    else if (x == 2) {
+      // Load 2 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+      r1 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 2 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+      r1 = _mm_madd_epi16(r1, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, r1);
+      r0 = _mm_hadd_epi32(r0, _mm_setzero_si128());
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());  // The upper 16 bit of each 16 bit result should be 0
+
+      // Save 4 resulting values to dst. The last 2 values are 0.
+      _mm_storel_epi64((__m128i*) (out + outAddrOffset), r0);
+    }
+    else if (x == 1) {
+      // Load 1 x lines
+      r0 = _mm_loadu_si128((__m128i *)tmpSample);    tmpSample += (MAX_CU_SIZE + 8);
+
+      // Multiply the 2 buffers by the filter (output 4 32 bit values)
+      r0 = _mm_madd_epi16(r0, filter);
+
+      // Add up results
+      r0 = _mm_hadd_epi32(r0, _mm_setzero_si128());
+      r0 = _mm_hadd_epi32(r0, _mm_setzero_si128());
+
+      // Add offset
+      r0 = _mm_add_epi32(r0, offset);
+      // Shift right by 12 bits
+      r0 = _mm_srli_epi32(r0, 12);
+      // And shift left again by 6 bits
+      r0 = _mm_slli_epi32(r0, 6);
+
+      r0 = _mm_hadd_epi16(r0, _mm_setzero_si128());  // The upper 16 bit of each 16 bit result should be 0
+
+     // Save 4 resulting values to dst. The last 3 values are 0.
+      _mm_storel_epi64((__m128i*) (out + outAddrOffset), r0);
+    }
+    else
+      assert(x==0);
   }
 }
