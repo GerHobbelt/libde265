@@ -32,4 +32,9 @@ void resampling_process_of_luma_block_sse_8bit (const uint8_t *src,  ptrdiff_t s
                                                 int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
                                                 int x, int y, const int *position_params, int16_t *buffer);
 
+void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
+                                                 int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_heigeht,
+                                                 int x, int y, const int *position_params, int16_t *buffer);
+
+
 #endif

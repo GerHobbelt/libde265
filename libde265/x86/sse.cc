@@ -102,6 +102,7 @@ void init_acceleration_functions_sse(struct acceleration_functions* accel)
 
     // Upsampling functions
     //accel->resampling_process_of_luma_block_8bit = resampling_process_of_luma_block_sse_8bit;
+    //accel->resampling_process_of_chroma_block_8bit = resampling_process_of_chroma_block_sse_8bit;
   }
 #endif
 }
