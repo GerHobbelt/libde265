@@ -290,7 +290,7 @@ void upsample_luma(const base_context* ctx,
   ALIGNED_16(int16_t) upsample_buffer[(MAX_CU_SIZE+8) * (MAX_CU_SIZE+7)];   // Plus 7 because of padding, +8 because of SSE save functions aligned to 8bytes.
   
   if (xP_src >= 3 && yP_src >= 3 &&
-      xP_right+4 <= ref_pic_width_in_luma_samples && yP_bottom+4 <= ref_pic_height_in_luma_samples) {
+      xP_right+4 < ref_pic_width_in_luma_samples && yP_bottom+4 < ref_pic_height_in_luma_samples) {
     // The block to upsample is entirely within the reference picture (no clipping required)
     ctx->acceleration.resample_block_luma(&ref[yP_src*ref_stride + xP_src], ref_stride, nPbH_src, out, out_stride, nPbW, nPbH, xP, yP, position_params, bitDepth_L, upsample_buffer);
     
