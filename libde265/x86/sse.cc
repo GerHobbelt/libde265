@@ -101,8 +101,8 @@ void init_acceleration_functions_sse(struct acceleration_functions* accel)
     accel->transform_add_8[3] = ff_hevc_transform_32x32_add_8_sse4;
 
     // Upsampling functions
-    //accel->resampling_process_of_luma_block_8bit = resampling_process_of_luma_block_sse_8bit;
-    //accel->resampling_process_of_chroma_block_8bit = resampling_process_of_chroma_block_sse_8bit;
+    accel->resampling_process_of_luma_block_8bit = resampling_process_of_luma_block_sse_8bit;
+    accel->resampling_process_of_chroma_block_8bit = resampling_process_of_chroma_block_sse_8bit;
   }
 #endif
 }
