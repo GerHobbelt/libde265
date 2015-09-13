@@ -631,21 +631,21 @@ void generate_inter_prediction_samples(base_context* ctx,
                     refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
           }
 
-          if (img->high_bit_depth(1)) {
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                      predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
-                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                      predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
-                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-          }
-          else {
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                      predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
-                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                      predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
-                      refPic->get_chroma_stride(), nPbW/2,nPbH/2, bit_depth_C);
+        if (img->high_bit_depth(0)) {
+          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
+                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
+                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+        }
+        else {
+          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
+                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+          mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+                    predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
+                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
           }
         }
       }
