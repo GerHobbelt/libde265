@@ -187,11 +187,14 @@ void mc_chroma(const base_context* ctx,
   int wC = sps->pic_width_in_luma_samples /sps->SubWidthC;
   int hC = sps->pic_height_in_luma_samples/sps->SubHeightC;
 
+  mv_x *= 2 / sps->SubWidthC;
+  mv_y *= 2 / sps->SubHeightC;
+
   int xFracC = mv_x & 7;
   int yFracC = mv_y & 7;
 
-  int xIntOffsC = xP/2 + (mv_x>>3);
-  int yIntOffsC = yP/2 + (mv_y>>3);
+  int xIntOffsC = xP/sps->SubWidthC  + (mv_x>>3);
+  int yIntOffsC = yP/sps->SubHeightC + (mv_y>>3);
 
   ALIGNED_32(int16_t mcbuffer[MAX_CU_SIZE*(MAX_CU_SIZE+7)]);
 
@@ -335,28 +338,28 @@ void upsample_luma(const base_context* ctx,
   }
 
 #ifdef DE265_LOG_TRACE
-    logtrace(LogMotion,"---MC luma %d %d = direct---\n",xFracL,yFracL);
+  logtrace(LogMotion, "---Upsampling Luma %d %d --- \n", xP, yP);
 
-    for (int y=0;y<nPbH;y++) {
-      for (int x=0;x<nPbW;x++) {
+  for (int y = 0; y<nPbH_src; y++) {
+    for (int x = 0; x<nPbW_src; x++) {
 
-        int xA = Clip3(0,w-1,x + xP);
-        int yA = Clip3(0,h-1,y + yP);
+      int xA = Clip3(0, ref_pic_width_in_luma_samples - 1, x + xP_src);
+      int yA = Clip3(0, ref_pic_height_in_luma_samples - 1, y + yP_src);
 
-        logtrace(LogMotion,"%02x ", ref[ xA + yA*ref_stride ]);
-      }
-      logtrace(LogMotion,"\n");
+      logtrace(LogMotion, "%02x ", ref[xA + yA*ref_stride]);
     }
+    logtrace(LogMotion, "\n");
+  }
 
-    logtrace(LogMotion," -> \n");
+  logtrace(LogMotion, " -> \n");
 
-    for (int y=0;y<nPbH;y++) {
-      for (int x=0;x<nPbW;x++) {
+  for (int y = 0; y<nPbH; y++) {
+    for (int x = 0; x<nPbW; x++) {
 
-        logtrace(LogMotion,"%02x ",out[y*out_stride+x] >> 6); // 6 will be used when summing predictions
-      }
-      logtrace(LogMotion,"\n");
+      logtrace(LogMotion, "%02x ", out[y*out_stride + x] >> 6); // 6 will be used when summing predictions
     }
+    logtrace(LogMotion, "\n");
+  }
 #endif
 }
 
@@ -430,28 +433,28 @@ void upsample_chroma(const base_context* ctx,
   }
 
 #ifdef DE265_LOG_TRACE
-    logtrace(LogMotion,"---MC luma %d %d = direct---\n",xFracL,yFracL);
+  logtrace(LogMotion, "---Upsampling Chroma %d %d --- \n", xP, yP);
 
-    for (int y=0;y<nPbH;y++) {
-      for (int x=0;x<nPbW;x++) {
+  for (int y = 0; y <= nPbH_src; y++) {
+    int yA = Clip3(0, ref_pic_height_in_chroma_samples - 1, y + yP_src);
 
-        int xA = Clip3(0,w-1,x + xP);
-        int yA = Clip3(0,h-1,y + yP);
+    for (int x = 0; x <= nPbW_src; x++) {
+      int xA = Clip3(0, ref_pic_width_in_chroma_samples - 1, x + xP_src);
 
-        logtrace(LogMotion,"%02x ", ref[ xA + yA*ref_stride ]);
-      }
-      logtrace(LogMotion,"\n");
+      logtrace(LogMotion, "%02x ", ref[xA + yA*ref_stride]);
     }
+    logtrace(LogMotion, "\n");
+  }
 
-    logtrace(LogMotion," -> \n");
+  logtrace(LogMotion, " -> \n");
 
-    for (int y=0;y<nPbH;y++) {
-      for (int x=0;x<nPbW;x++) {
+  for (int y = 0; y<nPbH; y++) {
+    for (int x = 0; x<nPbW; x++) {
 
-        logtrace(LogMotion,"%02x ",out[y*out_stride+x] >> 6); // 6 will be used when summing predictions
-      }
-      logtrace(LogMotion,"\n");
+      logtrace(LogMotion, "%02x ", out[y*out_stride + x] >> 6); // 6 will be used when summing predictions
     }
+    logtrace(LogMotion, "\n");
+  }
 #endif
 }
 
@@ -471,13 +474,16 @@ void generate_inter_prediction_samples(base_context* ctx,
   void*  pixels[3];
   int    stride[3];
 
+  const int SubWidthC  = img->sps.SubWidthC;
+  const int SubHeightC = img->sps.SubHeightC;
+
   pixels[0] = img->get_image_plane_at_pos_any_depth(0,xP,yP);
   stride[0] = img->get_image_stride(0);
 
-  pixels[1] = img->get_image_plane_at_pos_any_depth(1,xP/2,yP/2);
+  pixels[1] = img->get_image_plane_at_pos_any_depth(1,xP/SubWidthC,yP/SubHeightC);
   stride[1] = img->get_image_stride(1);
 
-  pixels[2] = img->get_image_plane_at_pos_any_depth(2,xP/2,yP/2);
+  pixels[2] = img->get_image_plane_at_pos_any_depth(2,xP/SubWidthC,yP/SubHeightC);
   stride[2] = img->get_image_stride(2);
 
 
@@ -649,10 +655,40 @@ void generate_inter_prediction_samples(base_context* ctx,
 
   // weighted sample prediction  (8.5.3.2.3)
 
+  const int shift1_L = libde265_max(2,14-img->sps.BitDepth_Y);
+  const int offset_shift1_L = img->sps.WpOffsetBdShiftY;
+  const int shift1_C = libde265_max(2,14-img->sps.BitDepth_C);
+  const int offset_shift1_C = img->sps.WpOffsetBdShiftC;
+
+  /*
   const int shift1_L = 14-img->sps.BitDepth_Y;
   const int offset_shift1_L = img->sps.BitDepth_Y-8;
   const int shift1_C = 14-img->sps.BitDepth_C;
   const int offset_shift1_C = img->sps.BitDepth_C-8;
+  */
+
+  /*
+  if (0)
+  printf("%d/%d %d/%d %d/%d %d/%d\n",
+         shift1_L,
+         Nshift1_L,
+         offset_shift1_L,
+         Noffset_shift1_L,
+         shift1_C,
+         Nshift1_C,
+         offset_shift1_C,
+         Noffset_shift1_C);
+
+  assert(shift1_L==
+         Nshift1_L);
+  assert(offset_shift1_L==
+         Noffset_shift1_L);
+  assert(shift1_C==
+         Nshift1_C);
+  assert(offset_shift1_C==
+         Noffset_shift1_C);
+  */
+
 
   logtrace(LogMotion,"predFlags (modified): %d %d\n", predFlag[0], predFlag[1]);
 
@@ -662,10 +698,11 @@ void generate_inter_prediction_samples(base_context* ctx,
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[0],nCS, nPbW,nPbH, bit_depth_L);
         ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
-                                              predSamplesC[0][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
+                                              predSamplesC[0][0],nCS,
+                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
         ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
-                                              predSamplesC[1][0],nCS, nPbW/2,nPbH/2, bit_depth_C);
-        
+                                              predSamplesC[1][0],nCS,
+                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);
@@ -696,10 +733,10 @@ void generate_inter_prediction_samples(base_context* ctx,
                                             predSamplesL[0],nCS, nPbW,nPbH,
                                             luma_w0, luma_o0, luma_log2WD, bit_depth_L);
         ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
-                                            predSamplesC[0][0],nCS, nPbW/2,nPbH/2,
+                                            predSamplesC[0][0],nCS, nPbW/SubWidthC,nPbH/SubHeightC,
                                             chroma0_w0, chroma0_o0, chroma_log2WD, bit_depth_C);
         ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
-                                            predSamplesC[1][0],nCS, nPbW/2,nPbH/2,
+                                            predSamplesC[1][0],nCS, nPbW/SubWidthC,nPbH/SubHeightC,
                                             chroma1_w0, chroma1_o0, chroma_log2WD, bit_depth_C);
       }
       else {
@@ -728,9 +765,11 @@ void generate_inter_prediction_samples(base_context* ctx,
         int16_t* in11 = predSamplesC[1][1];
 
         ctx->acceleration.put_weighted_pred_avg(pixels[1], stride[1],
-                                                in00,in01, nCS, nPbW/2, nPbH/2, bit_depth_C);
+                                                in00,in01, nCS,
+                                                nPbW/SubWidthC, nPbH/SubHeightC, bit_depth_C);
         ctx->acceleration.put_weighted_pred_avg(pixels[2], stride[2],
-                                                in10,in11, nCS, nPbW/2, nPbH/2, bit_depth_C);
+                                                in10,in11, nCS,
+                                                nPbW/SubWidthC, nPbH/SubHeightC, bit_depth_C);
       }
       else {
         // weighted prediction
@@ -773,12 +812,12 @@ void generate_inter_prediction_samples(base_context* ctx,
         int16_t* in11 = predSamplesC[1][1];
 
         ctx->acceleration.put_weighted_bipred(pixels[1], stride[1],
-                                              in00,in01, nCS, nPbW/2, nPbH/2,
+                                              in00,in01, nCS, nPbW/SubWidthC, nPbH/SubHeightC,
                                               chroma0_w0,chroma0_o0,
                                               chroma0_w1,chroma0_o1,
                                               chroma_log2WD, bit_depth_C);
         ctx->acceleration.put_weighted_bipred(pixels[2], stride[2],
-                                              in10,in11, nCS, nPbW/2, nPbH/2,
+                                              in10,in11, nCS, nPbW/SubWidthC, nPbH/SubHeightC,
                                               chroma1_w0,chroma1_o0,
                                               chroma1_w1,chroma1_o1,
                                               chroma_log2WD, bit_depth_C);
@@ -791,9 +830,11 @@ void generate_inter_prediction_samples(base_context* ctx,
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[l],nCS, nPbW,nPbH, bit_depth_L);
         ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
-                                              predSamplesC[0][l],nCS, nPbW/2,nPbH/2, bit_depth_C);
+                                              predSamplesC[0][l],nCS,
+                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
         ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
-                                              predSamplesC[1][l],nCS, nPbW/2,nPbH/2, bit_depth_C);
+                                              predSamplesC[1][l],nCS,
+                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
       }
       else {
         int refIdx = vi->refIdx[l];
@@ -815,10 +856,12 @@ void generate_inter_prediction_samples(base_context* ctx,
                                             predSamplesL[l],nCS, nPbW,nPbH,
                                             luma_w, luma_o, luma_log2WD, bit_depth_L);
         ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
-                                            predSamplesC[0][l],nCS, nPbW/2,nPbH/2,
+                                            predSamplesC[0][l],nCS,
+                                            nPbW/SubWidthC,nPbH/SubHeightC,
                                             chroma0_w, chroma0_o, chroma_log2WD, bit_depth_C);
         ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
-                                            predSamplesC[1][l],nCS, nPbW/2,nPbH/2,
+                                            predSamplesC[1][l],nCS,
+                                            nPbW/SubWidthC,nPbH/SubHeightC,
                                             chroma1_w, chroma1_o, chroma_log2WD, bit_depth_C);
       }
     }
@@ -1846,7 +1889,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
       logtrace(LogMotion,"MVP A%d=\n",k);
-      logmvcand(*vi);
+      logmvcand(vi);
 
       const de265_image* imgX = NULL;
       if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
@@ -1980,7 +2023,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
       logtrace(LogMotion,"MVP B%d=\n",k);
-      logmvcand(*vi);
+      logmvcand(vi);
 
 
       const de265_image* imgX = NULL;

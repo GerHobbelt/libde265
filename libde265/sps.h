@@ -48,19 +48,6 @@ enum {
   CHROMA_444_SEPARATE
 };
 
-struct sps_range_extension {
-  de265_error read(bitreader* reader);
-
-	bool transform_skip_rotation_enabled_flag;
-	bool transform_skip_context_enabled_flag;
-	bool implicit_rdpcm_enabled_flag;
-	bool explicit_rdpcm_enabled_flag;
-	bool extended_precision_processing_flag;
-	bool intra_smoothing_disabled_flag;
-	bool high_precision_offsets_enabled_flag;
-	bool persistent_rice_adaptation_enabled_flag;
-	bool cabac_bypass_alignment_enabled_flag;
-};
 
 struct sps_multilayer_extension {
   de265_error read(bitreader* reader);
@@ -81,6 +68,27 @@ typedef struct scaling_list_data {
 enum PresetSet {
   Preset_Default
 };
+
+
+class sps_range_extension
+{
+ public:
+  sps_range_extension();
+
+  uint8_t transform_skip_rotation_enabled_flag;
+  uint8_t transform_skip_context_enabled_flag;
+  uint8_t implicit_rdpcm_enabled_flag;
+  uint8_t explicit_rdpcm_enabled_flag;
+  uint8_t extended_precision_processing_flag;
+  uint8_t intra_smoothing_disabled_flag;
+  uint8_t high_precision_offsets_enabled_flag;
+  uint8_t persistent_rice_adaptation_enabled_flag;
+  uint8_t cabac_bypass_alignment_enabled_flag;
+
+  de265_error read(error_queue*, bitreader*);
+  void dump(int fd) const;
+};
+
 
 class seq_parameter_set {
 public:
@@ -179,7 +187,7 @@ public:
   bool sps_range_extension_flag;
   bool sps_multilayer_extension_flag;
   int  sps_extension_6bits;
-  
+
   sps_range_extension range_extension;
   sps_multilayer_extension multilayer_extension;
 
@@ -228,6 +236,11 @@ public:
 
   int SpsMaxLatencyPictures[7]; // [temporal layer]
 
+  uint8_t WpOffsetBdShiftY;
+  uint8_t WpOffsetBdShiftC;
+  int32_t WpOffsetHalfRangeY;
+  int32_t WpOffsetHalfRangeC;
+
 
   int getPUIndexRS(int pixelX,int pixelY) const {
     return (pixelX>>Log2MinPUSize) + (pixelY>>Log2MinPUSize)*PicWidthInMinPUs;
@@ -237,6 +250,9 @@ public:
     if (cIdx==0) return BitDepth_Y;
     else         return BitDepth_C;
   }
+
+  int get_chroma_shift_W(int cIdx) const { return cIdx ? SubWidthC -1 : 0; }
+  int get_chroma_shift_H(int cIdx) const { return cIdx ? SubHeightC-1 : 0; }
 };
 
 de265_error read_scaling_list(bitreader*, const seq_parameter_set*, scaling_list_data*, bool inPPS);

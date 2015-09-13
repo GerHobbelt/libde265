@@ -106,8 +106,11 @@ LIBDE265_API void de265_free_image_plane(struct de265_image* img, int cIdx)
 static int  de265_image_get_buffer(de265_decoder_context* ctx,
                                    de265_image_spec* spec, de265_image* img, void* userdata)
 {
-  int luma_stride   = (spec->width   + spec->alignment-1) / spec->alignment * spec->alignment;
-  int chroma_stride = (spec->width/2 + spec->alignment-1) / spec->alignment * spec->alignment;
+  const int rawChromaWidth  = spec->width  / img->sps.SubWidthC;
+  const int rawChromaHeight = spec->height / img->sps.SubHeightC;
+
+  int luma_stride   = (spec->width    + spec->alignment-1) / spec->alignment * spec->alignment;
+  int chroma_stride = (rawChromaWidth + spec->alignment-1) / spec->alignment * spec->alignment;
 
   assert(img->sps.BitDepth_Y >= 8 && img->sps.BitDepth_Y <= 16);
   assert(img->sps.BitDepth_C >= 8 && img->sps.BitDepth_C <= 16);
@@ -116,14 +119,27 @@ static int  de265_image_get_buffer(de265_decoder_context* ctx,
   int chroma_bpl = chroma_stride * (img->sps.BitDepth_C+7)/8;
 
   int luma_height   = spec->height;
-  int chroma_height = (spec->height+1)/2;
+  int chroma_height = rawChromaHeight;
+
+  bool alloc_failed = false;
 
   uint8_t* p[3] = { 0,0,0 };
   p[0] = (uint8_t *)ALLOC_ALIGNED_16(luma_height   * luma_bpl   + MEMORY_PADDING);
-  p[1] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
-  p[2] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
+  if (p[0]==NULL) { alloc_failed=true; }
 
-  if (p[0]==NULL || p[1]==NULL || p[2]==NULL) {
+  if (img->get_chroma_format() != de265_chroma_mono) {
+    p[1] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
+    p[2] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
+
+    if (p[1]==NULL || p[2]==NULL) { alloc_failed=true; }
+  }
+  else {
+    p[1] = NULL;
+    p[2] = NULL;
+    chroma_stride = 0;
+  }
+
+  if (alloc_failed) {
     for (int i=0;i<3;i++)
       if (p[i]) {
         FREE_ALIGNED(p[i]);
@@ -144,8 +160,9 @@ static void de265_image_release_buffer(de265_decoder_context* ctx,
 {
   for (int i=0;i<3;i++) {
     uint8_t* p = (uint8_t*)img->get_image_plane(i);
-    assert(p);
-    FREE_ALIGNED(p);
+    if (p) {
+      FREE_ALIGNED(p);
+    }
   }
 }
 
@@ -280,8 +297,14 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     chroma_width = (chroma_width+1)/2;
     break;
 
+  case de265_chroma_mono:
+    spec.format = de265_image_format_mono8;
+    chroma_width = 0;
+    chroma_height= 0;
+    break;
+
   default:
-    return DE265_ERROR_NOT_IMPLEMENTED_YET;
+    spec.format = de265_image_format_YUV422P8;
     break;
   }
 
@@ -375,6 +398,9 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
       
     // intra pred mode
     mem_alloc_success &= intraPredMode.alloc(sps->PicWidthInMinPUs, sps->PicHeightInMinPUs,
+                                              sps->Log2MinPUSize);
+
+    mem_alloc_success &= intraPredModeC.alloc(sps->PicWidthInMinPUs, sps->PicHeightInMinPUs,
                                               sps->Log2MinPUSize);
 
     // tu info
@@ -553,8 +579,8 @@ void de265_image::copy_lines_from(const de265_image* src, int first, int end)
     }
   }
 
-  int first_chroma = first>>1;
-  int end_chroma   = end>>1;
+  int first_chroma = first / src->sps.SubHeightC;
+  int end_chroma   = end / src->sps.SubHeightC;
 
   if (src->chroma_format != de265_chroma_mono) {
     if (src->chroma_stride == chroma_stride) {

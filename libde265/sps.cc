@@ -64,6 +64,20 @@ extern bool write_short_term_ref_pic_set(error_queue* errqueue,
                                          bool sliceRefPicSet); // is this in the slice header?
 
 
+sps_range_extension::sps_range_extension()
+{
+  transform_skip_rotation_enabled_flag = 0;
+  transform_skip_context_enabled_flag  = 0;
+  implicit_rdpcm_enabled_flag = 0;
+  explicit_rdpcm_enabled_flag = 0;
+  extended_precision_processing_flag = 0;
+  intra_smoothing_disabled_flag = 0;
+  high_precision_offsets_enabled_flag = 0;
+  persistent_rice_adaptation_enabled_flag = 0;
+  cabac_bypass_alignment_enabled_flag = 0;
+}
+
+
 seq_parameter_set::seq_parameter_set()
 {
   // TODO: this is dangerous
@@ -156,8 +170,9 @@ void seq_parameter_set::set_defaults(enum PresetSet)
       vui_parameters()
   */
 
-  sps_range_extension_flag = false;
-  sps_multilayer_extension_flag = false;
+  sps_extension_present_flag = 0;
+  sps_range_extension_flag = 0;
+  sps_multilayer_extension_flag = 0;
   sps_extension_6bits = 0;
 }
 
@@ -189,7 +204,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   error_queue* errqueue = ctx;
 
   video_parameter_set_id = get_bits(br,4);
-  
+
   int nuh_layer_id = ctx->get_layer_id();
   if (nuh_layer_id == 0) {
     sps_max_sub_layers = get_bits(br,3) + 1;
@@ -199,7 +214,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   }
   else {
     sps_ext_or_max_sub_layers_minus1 = get_bits(br,3);
-    
+
     // Standard F.7.4.3.2.1 (JCTVC-R1013_v6)
     // When not present, the value of sps_max_sub_layers_minus1 is inferred to be equal to ( sps_ext_or_max_sub_layers_minus1  = =  7 ) ? vps_max_sub_layers_minus1 : sps_ext_or_max_sub_layers_minus1.
     if (sps_ext_or_max_sub_layers_minus1 == 7) {
@@ -207,7 +222,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
       video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
 
       sps_max_sub_layers = vps->vps_max_sub_layers;
-    } 
+    }
     else {
       sps_max_sub_layers = sps_ext_or_max_sub_layers_minus1 + 1;
     }
@@ -240,12 +255,12 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     else {
       repFormatIdx = vps_ext->vps_rep_format_idx[vps_ext->LayerIdxInVps[ ctx->get_layer_id() ]];
     }
-    
+
     if (repFormatIdx > vps_ext->vps_num_rep_formats_minus1) {
       // repFormatIdx out of range
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
-    
+
     // Infer values from VPS
     rep_format rep = vps_ext->vps_ext_rep_format[repFormatIdx];
     chroma_format_idc = rep.chroma_format_vps_idc;
@@ -254,13 +269,21 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     pic_height_in_luma_samples = rep.pic_height_vps_in_luma_samples;
     bit_depth_luma   = rep.bit_depth_vps_luma_minus8 + 8;
     bit_depth_chroma = rep.bit_depth_vps_chroma_minus8 + 8;
-    
+
     // Infer conformance window from VPS
     conformance_window conf = rep.m_conformanceWindowVps;
     conf_win_left_offset = conf.conf_win_vps_left_offset;
     conf_win_right_offset = conf.conf_win_vps_right_offset;
     conf_win_top_offset = conf.conf_win_vps_top_offset;
     conf_win_bottom_offset = conf.conf_win_vps_top_offset;
+
+    // Set ChromaArrayType
+    if (separate_colour_plane_flag) {
+      ChromaArrayType = 0;
+    }
+    else {
+      ChromaArrayType = chroma_format_idc;
+    }
   }
   else {
     // --- decode chroma type ---
@@ -285,10 +308,6 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
         chroma_format_idc>3) {
       errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
-    }
-
-    if (chroma_format_idc != 1) {
-      return DE265_ERROR_NOT_IMPLEMENTED_YET;
     }
 
 
@@ -384,7 +403,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     // 	When sps_max_dec_pic_buffering_minus1[ i ] is not present for i in the range of 0 to sps_max_sub_layers_minus1, inclusive, due to MultiLayerExtSpsFlag being equal to 1, for a layer that refers to the SPS and has nuh_layer_id equal to currLayerId, the value of sps_max_dec_pic_buffering_minus1[ i ] is inferred to be equal to max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] of the active VPS, where layerIdx is equal to the value such that LayerSetLayerIdList[ TargetDecLayerSetIdx ][ layerIdx ] is equal to currLayerId.
     video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
     video_parameter_set_extension* vps_ext = &vps->vps_extension;
-   
+
     int TargetOlsIdx = ctx->get_multi_layer_decoder()->get_target_ols_idx();
     for (int i=0 ; i <= sps_max_sub_layers-1; i++ ) {
       int TargetDecLayerSetIdx = vps_ext->OlsIdxToLsIdx[ TargetOlsIdx ];
@@ -501,9 +520,11 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   strong_intra_smoothing_enable_flag = get_bits(br,1);
   vui_parameters_present_flag = get_bits(br,1);
 
-if (vui_parameters_present_flag) {
+
+  if (vui_parameters_present_flag) {
     vui.read(br, sps_max_sub_layers - 1);
   }
+
 
   sps_extension_present_flag = get_bits(br,1);
   if (sps_extension_present_flag) {
@@ -518,7 +539,8 @@ if (vui_parameters_present_flag) {
   }
 
   if (sps_range_extension_flag) {
-    range_extension.read(br);
+    de265_error err = range_extension.read(errqueue, br);
+    if (err != DE265_OK) { return err; }
   }
   if (sps_multilayer_extension_flag) {
     multilayer_extension.read(br);
@@ -601,6 +623,20 @@ de265_error seq_parameter_set::compute_derived_values()
   PicWidthInTbsY  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinTrafoSize);
   PicHeightInTbsY = PicHeightInCtbsY << (Log2CtbSizeY - Log2MinTrafoSize);
   PicSizeInTbsY = PicWidthInTbsY * PicHeightInTbsY;
+
+
+  if (range_extension.high_precision_offsets_enabled_flag) {
+    WpOffsetBdShiftY = 0;
+    WpOffsetBdShiftC = 0;
+    WpOffsetHalfRangeY = 1 << (BitDepth_Y - 1);
+    WpOffsetHalfRangeC = 1 << (BitDepth_C - 1);
+  }
+  else {
+    WpOffsetBdShiftY = ( BitDepth_Y - 8 );
+    WpOffsetBdShiftC = ( BitDepth_C - 8 );
+    WpOffsetHalfRangeY = 1 << 7;
+    WpOffsetHalfRangeC = 1 << 7;
+  }
 
 
   // --- check SPS sanity ---
@@ -753,6 +789,11 @@ void seq_parameter_set::dump(int fd) const
   LOG1("strong_intra_smoothing_enable_flag : %d\n", strong_intra_smoothing_enable_flag);
   LOG1("vui_parameters_present_flag        : %d\n", vui_parameters_present_flag);
 
+  LOG1("sps_extension_present_flag    : %d\n", sps_extension_present_flag);
+  LOG1("sps_range_extension_flag      : %d\n", sps_range_extension_flag);
+  LOG1("sps_multilayer_extension_flag : %d\n", sps_multilayer_extension_flag);
+  LOG1("sps_extension_6bits           : %d\n", sps_extension_6bits);
+
   LOG1("CtbSizeY     : %d\n", CtbSizeY);
   LOG1("MinCbSizeY   : %d\n", MinCbSizeY);
   LOG1("MaxCbSizeY   : %d\n", 1<<(log2_min_luma_coding_block_size + log2_diff_max_min_luma_coding_block_size));
@@ -763,6 +804,10 @@ void seq_parameter_set::dump(int fd) const
   LOG1("PicHeightInCtbsY        : %d\n", PicHeightInCtbsY);
   LOG1("SubWidthC               : %d\n", SubWidthC);
   LOG1("SubHeightC              : %d\n", SubHeightC);
+
+  if (sps_range_extension_flag) {
+    range_extension.dump(fd);
+  }
 
   return;
 
@@ -1286,23 +1331,49 @@ de265_error seq_parameter_set::write(error_queue* errqueue, CABAC_encoder& out)
   return DE265_OK;
 }
 
-de265_error sps_range_extension::read(bitreader* reader)
-{
-  transform_skip_rotation_enabled_flag = get_bits(reader,1);
-  transform_skip_context_enabled_flag = get_bits(reader,1);
-  implicit_rdpcm_enabled_flag = get_bits(reader,1);
-  explicit_rdpcm_enabled_flag = get_bits(reader,1);
-  extended_precision_processing_flag = get_bits(reader,1);
-  intra_smoothing_disabled_flag = get_bits(reader,1);
-  high_precision_offsets_enabled_flag = get_bits(reader,1);
-  persistent_rice_adaptation_enabled_flag = get_bits(reader,1);
-  cabac_bypass_alignment_enabled_flag = get_bits(reader,1);
-
-  return DE265_OK;
-}
 
 de265_error sps_multilayer_extension::read(bitreader* reader)
 {
   inter_view_mv_vert_constraint_flag = get_bits(reader,1);
   return DE265_OK;
 }
+
+
+de265_error sps_range_extension::read(error_queue* errqueue, bitreader* br)
+{
+  transform_skip_rotation_enabled_flag    = get_bits(br,1);
+  transform_skip_context_enabled_flag     = get_bits(br,1);
+  implicit_rdpcm_enabled_flag             = get_bits(br,1);
+  explicit_rdpcm_enabled_flag             = get_bits(br,1);
+  extended_precision_processing_flag      = get_bits(br,1);
+  intra_smoothing_disabled_flag           = get_bits(br,1);
+  high_precision_offsets_enabled_flag     = get_bits(br,1);
+  persistent_rice_adaptation_enabled_flag = get_bits(br,1);
+  cabac_bypass_alignment_enabled_flag     = get_bits(br,1);
+
+  return DE265_OK;
+}
+
+
+#define LOG0(t) log2fh(fh, t)
+#define LOG1(t,d) log2fh(fh, t,d)
+void sps_range_extension::dump(int fd) const
+{
+  FILE* fh;
+  if (fd==1) fh=stdout;
+  else if (fd==2) fh=stderr;
+  else { return; }
+
+  LOG0("----------------- SPS-range-extension -----------------\n");
+  LOG1("transform_skip_rotation_enabled_flag    : %d\n", transform_skip_rotation_enabled_flag);
+  LOG1("transform_skip_context_enabled_flag     : %d\n", transform_skip_context_enabled_flag);
+  LOG1("implicit_rdpcm_enabled_flag             : %d\n", implicit_rdpcm_enabled_flag);
+  LOG1("explicit_rdpcm_enabled_flag             : %d\n", explicit_rdpcm_enabled_flag);
+  LOG1("extended_precision_processing_flag      : %d\n", extended_precision_processing_flag);
+  LOG1("intra_smoothing_disabled_flag           : %d\n", intra_smoothing_disabled_flag);
+  LOG1("high_precision_offsets_enabled_flag     : %d\n", high_precision_offsets_enabled_flag);
+  LOG1("persistent_rice_adaptation_enabled_flag : %d\n", persistent_rice_adaptation_enabled_flag);
+  LOG1("cabac_bypass_alignment_enabled_flag     : %d\n", cabac_bypass_alignment_enabled_flag);
+}
+#undef LOG1
+#undef LOG0

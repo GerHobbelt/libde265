@@ -42,8 +42,11 @@ void copy_subimage(uint8_t* dst,int dststride,
 #ifdef DE265_LOGGING
 static int current_poc=0;
 static int log_poc_start=-9999; // frame-numbers can be negative
+static int current_layer=0;
+static int log_layer_start=0; // log all layers with layerID >= log_layer_start. (0 = all)
 static bool disable_log[NUMBER_OF_LogModules];
 void log_set_current_POC(int poc) { current_poc=poc; }
+void log_set_current_layer(int layer) { current_layer = layer; }
 #endif
 
 
@@ -79,6 +82,7 @@ static long logcnt[10];
 void logerror(enum LogModule module, const char* string, ...)
 {
   if (current_poc < log_poc_start) { return; }
+  if (current_layer < log_layer_start) { return; }
   if (disable_log[module]) return;
 
   va_list va;
@@ -97,6 +101,7 @@ void loginfo (enum LogModule module, const char* string, ...)
 {
   if (verbosity<1) return;
   if (current_poc < log_poc_start) { return; }
+  if (current_layer < log_layer_start) { return; }
   if (disable_log[module]) return;
 
   va_list va;
@@ -115,6 +120,7 @@ void logdebug(enum LogModule module, const char* string, ...)
 {
   if (verbosity<2) return;
   if (current_poc < log_poc_start) { return; }
+  if (current_layer < log_layer_start) { return; }
   if (disable_log[module]) return;
 
   va_list va;
@@ -133,6 +139,7 @@ void logtrace(enum LogModule module, const char* string, ...)
 {
   if (verbosity<3) return;
   if (current_poc < log_poc_start) { return; }
+  if (current_layer < log_layer_start) { return; }
   if (disable_log[module]) return;
 
   //if (module != LogSymbols /*&& module != LogCABAC*/) { return; }
@@ -174,6 +181,23 @@ void log2fh(FILE* fh, const char* string, ...)
 
 
 void printBlk(const char* title, const int16_t* data, int blksize, int stride)
+{
+  printf("%s:\n",title);
+
+  for (int y=0;y<blksize;y++) {
+    //logtrace(LogTransform,"  ");
+    printf("  ");
+    for (int x=0;x<blksize;x++) {
+      //logtrace(LogTransform,"*%3d ", data[x+y*stride]);
+      printf("%4d ", data[x+y*stride]);
+    }
+    //logtrace(LogTransform,"*\n");
+    printf("\n");
+  }
+}
+
+
+void printBlk(const char* title, const int32_t* data, int blksize, int stride)
 {
   printf("%s:\n",title);
 

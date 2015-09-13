@@ -66,13 +66,16 @@ public:
 
   // prediction
 
-  enum IntraPredMode IntraPredModeC; // chroma intra-prediction mode for current CB
+  // enum IntraPredMode IntraPredModeC[4]; // chroma intra-prediction mode for current CB
+  int ResScaleVal;
 
 
   // residual data
 
   uint8_t cu_transquant_bypass_flag;
   uint8_t transform_skip_flag[3];
+  uint8_t explicit_rdpcm_flag;
+  uint8_t explicit_rdpcm_dir;
 
   ALIGNED_16(int16_t) _coeffBuf[(32*32)+8]; // alignment required for SSE code !
   int16_t *coeffBuf;
@@ -81,11 +84,15 @@ public:
   int16_t coeffPos[3][32*32];
   int16_t nCoeff[3];
 
+  int32_t residual_luma[32*32]; // only used when cross-comp-prediction is enabled
+
 
   // quantization
 
   int IsCuQpDeltaCoded;
   int CuQpDelta;
+  int IsCuChromaQpOffsetCoded;
+  int CuQpOffsetCb, CuQpOffsetCr;
 
   int currentQPY;
   int currentQG_x, currentQG_y;
@@ -96,6 +103,7 @@ public:
   CABAC_decoder cabac_decoder;
 
   context_model_table ctx_model;
+  uint8_t StatCoeff[4];
 
   decoder_context* decctx;
   struct de265_image *img;

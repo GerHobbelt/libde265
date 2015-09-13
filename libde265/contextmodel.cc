@@ -191,7 +191,7 @@ void context_model_table::decouple_or_alloc_with_empty_data()
 
 
 static void set_initValue(int SliceQPY,
-                          context_model* model, int initValue)
+                          context_model* model, int initValue, int nContexts)
 {
   int slopeIdx = initValue >> 4;
   int intersecIdx = initValue & 0xF;
@@ -201,12 +201,14 @@ static void set_initValue(int SliceQPY,
 
   // logtrace(LogSlice,"QP=%d slopeIdx=%d intersecIdx=%d m=%d n=%d\n",SliceQPY,slopeIdx,intersecIdx,m,n);
 
-  model->MPSbit=(preCtxState<=63) ? 0 : 1;
-  model->state = model->MPSbit ? (preCtxState-64) : (63-preCtxState);
+  for (int i=0;i<nContexts;i++) {
+    model[i].MPSbit=(preCtxState<=63) ? 0 : 1;
+    model[i].state = model[i].MPSbit ? (preCtxState-64) : (63-preCtxState);
 
-  // model state will always be between [0;62]
+    // model state will always be between [0;62]
 
-  assert(model->state <= 62);
+    assert(model[i].state <= 62);
+  }
 }
 
 
@@ -248,6 +250,10 @@ static const int initValue_significant_coeff_flag[3][42] = {
       121,  122,  121,  167,  151,  183,  140,  151,  183,  140
     },
   };
+static const int initValue_significant_coeff_flag_skipmode[3][2] = {
+  { 141,111 }, { 140,140 }, { 140,140 }
+};
+
 static const int initValue_coeff_abs_level_greater1_flag[72] = {
     140, 92,137,138,140,152,138,139,153, 74,149, 92,139,107,122,152,
     140,179,166,182,140,227,122,197,154,196,196,167,154,152,167,182,
@@ -280,9 +286,16 @@ static void init_context(int SliceQPY,
 {
   for (int i=0;i<len;i++)
     {
-      set_initValue(SliceQPY, &model[i],
-                    initValues[i]);
+      set_initValue(SliceQPY, &model[i], initValues[i], 1);
     }
+}
+
+
+static void init_context_const(int SliceQPY,
+                               context_model* model,
+                               int initValue, int len)
+{
+  set_initValue(SliceQPY, model, initValue, len);
 }
 
 void initialize_CABAC_models(context_model context_model_table[CONTEXT_MODEL_TABLE_LENGTH],
@@ -301,6 +314,9 @@ void initialize_CABAC_models(context_model context_model_table[CONTEXT_MODEL_TAB
     init_context(QPY, cm+CONTEXT_MODEL_ABS_MVD_GREATER01_FLAG, &initValue_abs_mvd_greater01_flag[initType == 1 ? 0 : 2], 2);
     init_context(QPY, cm+CONTEXT_MODEL_MVP_LX_FLAG,            initValue_mvp_lx_flag,            1);
     init_context(QPY, cm+CONTEXT_MODEL_RQT_ROOT_CBF,           initValue_rqt_root_cbf,           1);
+
+    init_context_const(QPY, cm+CONTEXT_MODEL_RDPCM_FLAG, 139, 2);
+    init_context_const(QPY, cm+CONTEXT_MODEL_RDPCM_DIR,  139, 2);
   }
 
   init_context(QPY, cm+CONTEXT_MODEL_SPLIT_CU_FLAG, initValue_split_cu_flag[initType], 3);
@@ -314,6 +330,8 @@ void initialize_CABAC_models(context_model context_model_table[CONTEXT_MODEL_TAB
   init_context(QPY, cm+CONTEXT_MODEL_LAST_SIGNIFICANT_COEFFICIENT_Y_PREFIX, &initValue_last_significant_coefficient_prefix[initType * 18], 18);
   init_context(QPY, cm+CONTEXT_MODEL_CODED_SUB_BLOCK_FLAG,                  &initValue_coded_sub_block_flag[initType * 4],        4);
   init_context(QPY, cm+CONTEXT_MODEL_SIGNIFICANT_COEFF_FLAG,              initValue_significant_coeff_flag[initType],    42);
+  init_context(QPY, cm+CONTEXT_MODEL_SIGNIFICANT_COEFF_FLAG+42, initValue_significant_coeff_flag_skipmode[initType], 2);
+
   init_context(QPY, cm+CONTEXT_MODEL_COEFF_ABS_LEVEL_GREATER1_FLAG,       &initValue_coeff_abs_level_greater1_flag[initType * 24], 24);
   init_context(QPY, cm+CONTEXT_MODEL_COEFF_ABS_LEVEL_GREATER2_FLAG,       &initValue_coeff_abs_level_greater2_flag[initType *  6],  6);
   init_context(QPY, cm+CONTEXT_MODEL_SAO_MERGE_FLAG,                      &initValue_sao_merge_leftUp_flag[initType],    1);
@@ -321,4 +339,9 @@ void initialize_CABAC_models(context_model context_model_table[CONTEXT_MODEL_TAB
   init_context(QPY, cm+CONTEXT_MODEL_CU_QP_DELTA_ABS,        initValue_cu_qp_delta_abs,        2);
   init_context(QPY, cm+CONTEXT_MODEL_TRANSFORM_SKIP_FLAG,    initValue_transform_skip_flag,    2);
   init_context(QPY, cm+CONTEXT_MODEL_CU_TRANSQUANT_BYPASS_FLAG, &initValue_cu_transquant_bypass_flag[initType], 1);
+
+  init_context_const(QPY, cm+CONTEXT_MODEL_LOG2_RES_SCALE_ABS_PLUS1, 154, 8);
+  init_context_const(QPY, cm+CONTEXT_MODEL_RES_SCALE_SIGN_FLAG,      154, 2);
+  init_context_const(QPY, cm+CONTEXT_MODEL_CU_CHROMA_QP_OFFSET_FLAG, 154, 1);
+  init_context_const(QPY, cm+CONTEXT_MODEL_CU_CHROMA_QP_OFFSET_IDX,  154, 1);
 }

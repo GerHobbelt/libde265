@@ -147,8 +147,10 @@ void disable_logging(enum LogModule);
 
 #ifdef DE265_LOGGING
 void log_set_current_POC(int poc);
+void log_set_current_layer(int layer);
 #else
 #define log_set_current_POC(poc) { }
+#define log_set_current_layer(layer) { }
 #endif
 
 #ifdef DE265_LOG_ERROR
@@ -178,6 +180,7 @@ void logtrace(enum LogModule module, const char* string, ...);
 void log2fh(FILE* fh, const char* string, ...);
 
 
+void printBlk(const char* title,const int32_t* data, int blksize, int stride);
 void printBlk(const char* title,const int16_t* data, int blksize, int stride);
 void printBlk(const char* title,const uint8_t* data, int blksize, int stride);
 

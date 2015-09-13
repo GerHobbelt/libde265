@@ -93,6 +93,10 @@ thread_context::thread_context()
   IsCuQpDeltaCoded = false;
   CuQpDelta = 0;
 
+  IsCuChromaQpOffsetCoded = false;
+  CuQpOffsetCb = 0;
+  CuQpOffsetCr = 0;
+
   /*
   currentQPY = 0;
   currentQG_x = 0;
@@ -2480,7 +2484,7 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
     img->PicState = UsedForShortTermReference;
 
     log_set_current_POC(ctx->img->PicOrderCntVal);
-
+    log_set_current_layer(ctx->layer_ID);
 
     // next image is not the first anymore
 

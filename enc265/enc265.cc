@@ -86,7 +86,7 @@ struct inout_params
   option_int input_height;
 
   // output
-
+   
   option_string output_filename;
 
   // debug

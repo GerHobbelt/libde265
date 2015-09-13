@@ -260,6 +260,8 @@ struct de265_image {
     return pixels[cIdx] + xpos + ypos*stride;
   }
 
+
+  /// xpos;ypos in actual plane resolution
   template <class pixel_t>
   pixel_t* get_image_plane_at_pos_NEW(int cIdx, int xpos,int ypos)
   {
@@ -433,6 +435,7 @@ private:
   MetaDataArray<CB_ref_info> cb_info;
   MetaDataArray<PB_ref_info> pb_info;
   MetaDataArray<uint8_t>     intraPredMode;
+  MetaDataArray<uint8_t>     intraPredModeC;
   MetaDataArray<uint8_t>     tu_info;
   MetaDataArray<uint8_t>     deblk_info;
 
@@ -665,7 +668,8 @@ public:
         intraPredMode[PUidx + x + y*intraPredMode.width_in_units] = mode;
   }
 
-  void set_IntraPredMode(int x0,int y0,int log2blkSize, enum IntraPredMode mode)
+  void set_IntraPredMode(int x0,int y0,int log2blkSize,
+                         enum IntraPredMode mode)
   {
     int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
     int PUidx  = (x0>>sps.Log2MinPUSize) + (y0>>sps.Log2MinPUSize)*sps.PicWidthInMinPUs;
@@ -680,6 +684,38 @@ public:
         intraPredMode[idx] = mode;
       }
   }
+
+
+  enum IntraPredMode get_IntraPredModeC(int x,int y) const
+  {
+    return (enum IntraPredMode)(intraPredModeC.get(x,y) & 0x3f);
+  }
+
+  bool is_IntraPredModeC_Mode4(int x,int y) const
+  {
+    return intraPredModeC.get(x,y) & 0x80;
+  }
+
+  void set_IntraPredModeC(int x0,int y0,int log2blkSize, enum IntraPredMode mode,
+                          bool is_mode4)
+  {
+    uint8_t combinedValue = mode;
+    if (is_mode4) combinedValue |= 0x80;
+
+    int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
+    int PUidx  = (x0>>sps.Log2MinPUSize) + (y0>>sps.Log2MinPUSize)*sps.PicWidthInMinPUs;
+
+    for (int y=0;y<pbSize;y++)
+      for (int x=0;x<pbSize;x++) {
+        assert(x<sps.PicWidthInMinPUs);
+        assert(y<sps.PicHeightInMinPUs);
+
+        int idx = PUidx + x + y*intraPredModeC.width_in_units;
+        assert(idx<intraPredModeC.data_size);
+        intraPredModeC[idx] = combinedValue;
+      }
+  }
+
 
   /*
   // NOTE: encoder only

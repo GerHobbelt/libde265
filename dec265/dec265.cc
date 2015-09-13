@@ -38,6 +38,8 @@
 #include <unistd.h>
 #endif
 
+#include <sstream>
+
 #include "libde265/quality.h"
 
 #if HAVE_VIDEOGFX
@@ -112,14 +114,21 @@ static void write_picture(const de265_image* img)
   de265_get_image_NAL_header(img, &nalunit_type, NULL, &nuh_layer_id, &nuh_temporal_id);
 
   if (fh[nuh_layer_id]==NULL) {
-    // Construct layer file name
-    std::string out_filename = output_filename;
-    int dot_pos = out_filename.find(".");
-    std::string layer_out_filename = out_filename.substr(0, dot_pos);
-    std::string extension = out_filename.substr(dot_pos);
-    layer_out_filename.append("_");
-    layer_out_filename.append(std::to_string(nuh_layer_id));
-    layer_out_filename.append(extension);
+    std::string layer_out_filename;
+
+    if (nuh_layer_id>0) {
+      // Construct layer file name
+      std::string out_filename = output_filename;
+      int dot_pos = out_filename.find(".");
+      std::string extension = out_filename.substr(dot_pos);
+
+      std::stringstream layer_out_filename_ss;
+      layer_out_filename_ss << out_filename.substr(0, dot_pos) << "_" << nuh_layer_id << extension;
+      layer_out_filename = layer_out_filename_ss.str();
+    }
+    else {
+      layer_out_filename = output_filename;
+    }
 
     fh[nuh_layer_id] = fopen(layer_out_filename.c_str(), "wb");
   }
@@ -181,11 +190,27 @@ void display_image(const struct de265_image* img)
 
   int width  = de265_get_image_width(img,0);
   int height = de265_get_image_height(img,0);
+  de265_chroma chroma = de265_get_chroma_format(img);
+
+  ChromaFormat vgfx_chroma;
+  Colorspace   vgfx_cs = Colorspace_YUV;
+
+  switch (chroma) {
+  case de265_chroma_420:  vgfx_chroma = Chroma_420; break;
+  case de265_chroma_422:  vgfx_chroma = Chroma_422; break;
+  case de265_chroma_444:  vgfx_chroma = Chroma_444; break;
+  case de265_chroma_mono: vgfx_cs = Colorspace_Greyscale; break;
+  }
 
   Image<Pixel> visu;
-  visu.Create(width, height, Colorspace_YUV, Chroma_420);
+  visu.Create(width, height, vgfx_cs, vgfx_chroma);
 
-  for (int ch=0;ch<3;ch++) {
+  int nChannels = 3;
+  if (chroma == de265_chroma_mono) {
+    nChannels = 1;
+  }
+
+  for (int ch=0;ch<nChannels;ch++) {
     const uint8_t* data;
     int stride;
 
@@ -242,9 +267,19 @@ bool display_sdl(const struct de265_image* img)
   int chroma_width  = de265_get_image_width(img,1);
   int chroma_height = de265_get_image_height(img,1);
 
+  de265_chroma chroma = de265_get_chroma_format(img);
+
   if (!sdl_active) {
     sdl_active=true;
-    sdlWin.init(width,height);
+    enum SDL_YUV_Display::SDL_Chroma sdlChroma;
+    switch (chroma) {
+    case de265_chroma_420:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_420;  break;
+    case de265_chroma_422:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_422;  break;
+    case de265_chroma_444:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_444;  break;
+    case de265_chroma_mono: sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO; break;
+    }
+
+    sdlWin.init(width,height, sdlChroma);
   }
 
   int stride,chroma_stride;
@@ -260,11 +295,14 @@ bool display_sdl(const struct de265_image* img)
   if ((bd=de265_get_bits_per_pixel(img, 0)) > 8) {
     y16  = convert_to_8bit(y,  width,height,stride,bd); y=y16;
   }
-  if ((bd=de265_get_bits_per_pixel(img, 1)) > 8) {
-    cb16 = convert_to_8bit(cb, chroma_width,chroma_height,chroma_stride,bd); cb=cb16;
-  }
-  if ((bd=de265_get_bits_per_pixel(img, 2)) > 8) {
-    cr16 = convert_to_8bit(cr, chroma_width,chroma_height,chroma_stride,bd); cr=cr16;
+
+  if (chroma != de265_chroma_mono) {
+    if ((bd=de265_get_bits_per_pixel(img, 1)) > 8) {
+      cb16 = convert_to_8bit(cb, chroma_width,chroma_height,chroma_stride,bd); cb=cb16;
+    }
+    if ((bd=de265_get_bits_per_pixel(img, 2)) > 8) {
+      cr16 = convert_to_8bit(cr, chroma_width,chroma_height,chroma_stride,bd); cr=cr16;
+    }
   }
 
   sdlWin.display(y,cb,cr, stride, chroma_stride);
@@ -720,6 +758,8 @@ int main(int argc, char** argv)
 
           err = de265_decode(ctx, &more);
           if (err != DE265_OK) {
+            // if (quiet<=1) fprintf(stderr,"ERROR: %s\n", de265_get_error_text(err));
+
             if (check_hash && err == DE265_ERROR_CHECKSUM_MISMATCH)
               stop = 1;
             more = 0;
