@@ -934,8 +934,8 @@ void resampling_process_of_luma_block_fallback_8bit(
   int16_t  *tmpSample;
 
   // Calculate the position of the top left point in the reference
-  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int x_src = ((((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int y_src = ((((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
 
   // Horizontal filtering
   for (int x=0; x < dst_width; x++) {
@@ -1059,8 +1059,8 @@ void resampling_process_of_chroma_block_fallback_8bit(
   int16_t  *tmpSample;
 
   // Calculate the position of the top left point in the reference
-  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int x_src = ((((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int y_src = ((((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
 
   // Horizontal filtering
   for (int x=0; x < dst_width; x++) {

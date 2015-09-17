@@ -282,10 +282,10 @@ void upsample_luma(const base_context* ctx,
              const int* position_params)
 {  
   // Calculate the block position (top left) and the bottom right of the block in the reference (scaled)
-  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
-  int xP_right  = (((xP + (nPbW-1) - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int yP_bottom = (((yP + (nPbH-1) - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_src = ((((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int yP_src = ((((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
+  int xP_right  = ((((xP + (nPbW-1) - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int yP_bottom = ((((yP + (nPbH-1) - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
   // Calculate the height of the block in the reference image
   int nPbW_src = xP_right - xP_src + 1;
   int nPbH_src = yP_bottom - yP_src + 1;
@@ -378,10 +378,10 @@ void upsample_chroma(const base_context* ctx,
   yP = yP / 2;
 
    // Calculate the block position (top left) and the size of the block in the reference (scaled)
-  int xP_src = (((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int yP_src = (((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
-  int xP_right  = (((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int yP_bottom = (((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int xP_src = ((((xP - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int yP_src = ((((yP - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
+  int xP_right  = ((((xP + nPbW - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int yP_bottom = ((((yP + nPbH - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
 
   ALIGNED_16(int16_t) upsample_buffer[(MAX_CU_SIZE/2+8) * (MAX_CU_SIZE/2+3)]; // 8 because of SSE, 3 because of padding
 

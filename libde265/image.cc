@@ -231,7 +231,7 @@ de265_image::de265_image()
   equalPictureSizeAndOffsetFlag = false;
   interLayerMotionPredictionEnabled = false;
   for (int i = 0; i<10; i++) {
-    il_scaling_parameters[10] = -1;
+    il_scaling_parameters[i] = -1;
   }
 }
 
