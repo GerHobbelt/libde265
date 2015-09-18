@@ -1642,7 +1642,7 @@ void decoder_context::derive_inter_layer_reference_picture(decoder_context* ctx,
   if (pps_ext->colour_mapping_enabled_flag) {
     for (int i = 0; i <= pps_ext->cm_table.num_cm_ref_layers_minus1; i++) {
       if (pps_ext->cm_table.cm_ref_layer_id[i] == rLId) {
-        currColourMappingEnableFlag == true;
+        currColourMappingEnableFlag = true;
       }
     }
   }
