@@ -562,7 +562,6 @@ void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstr
   printf("Upsampling Y from (%dx%d) to (%dx%d) took %d us\n", PicWidthInSamplesRefLayerY, PicHeightInSamplesRefLayerY, PicWidthInSamplesCurLayerY, PicHeightInSamplesCurLayerY, duration);
 #endif
 }
-#endif
 
 void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
                                                int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
@@ -1813,3 +1812,5 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
   //}
 
 }
+
+#endif
