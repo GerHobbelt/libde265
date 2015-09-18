@@ -22,6 +22,7 @@
 #ifndef SSE_UPSAMPLING_H
 #define SSE_UPSAMPLING_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 void resampling_process_of_luma_sample_values_sse (uint8_t *src, ptrdiff_t srcstride, int src_size[2],

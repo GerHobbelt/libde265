@@ -136,22 +136,22 @@ static inline void *ALLOC_ALIGNED(size_t alignment, size_t size) {
 //                  { 0, 1,  -2,  4, 63,  -3, 1,  0} };
 
 // 8 bit representation of the above filters. Each 8 bits are one coefficient.
-ALIGNED_16(const __m64) fL_8bit[16] = { 0x0000004000000000,
-                                        0x0001fd3f04fe0100,
-                                        0xff02fb3e08fd0100,
-                                        0xff03f83c0dfc0100,
-                                        0xff04f63a11fb0100,
-                                        0xff04f5341af803ff,
-                                        0xff03f72f1ff604ff,
-                                        0xff04f52d22f604ff,
-                                        0xff04f52828f504ff,
-                                        0xff04f6222df504ff,
-                                        0xff04f61f2ff703ff,
-                                        0xff03f81a34f504ff,
-                                        0x0001fb113af604ff,
-                                        0x0001fc0d3cf803ff,
-                                        0x0001fd083efb02ff,
-                                        0x0001fe043ffd0100 };
+//ALIGNED_16(const __m64) fL_8bit[16] = { 0x0000004000000000,
+//                                        0x0001fd3f04fe0100,
+//                                        0xff02fb3e08fd0100,
+//                                        0xff03f83c0dfc0100,
+//                                        0xff04f63a11fb0100,
+//                                        0xff04f5341af803ff,
+//                                        0xff03f72f1ff604ff,
+//                                        0xff04f52d22f604ff,
+//                                        0xff04f52828f504ff,
+//                                        0xff04f6222df504ff,
+//                                        0xff04f61f2ff703ff,
+//                                        0xff03f81a34f504ff,
+//                                        0x0001fb113af604ff,
+//                                        0x0001fc0d3cf803ff,
+//                                        0x0001fd083efb02ff,
+//                                        0x0001fe043ffd0100 };
 
 // The filters in 8 bit fromat. 2 times the same filter to perform 2 multiplications with the filter at once.
 ALIGNED_16(const int8_t) fL_8bit_2x[256] = {  0, 0,   0, 64,  0,   0, 0,  0 ,  0, 0,   0, 64,  0,   0, 0,  0 ,
@@ -217,6 +217,7 @@ uint64_t rdtsc(){
 #endif
 #endif
 
+#if HAVE_SSE4_1
 // Upsampling process for 8 bit input ...
 void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstride, int src_size[2],
                                                   uint8_t *dst, ptrdiff_t dststride, int dst_size[2],
@@ -560,7 +561,8 @@ void resampling_process_of_luma_sample_values_sse(uint8_t *src, ptrdiff_t srcstr
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 ).count();
   printf("Upsampling Y from (%dx%d) to (%dx%d) took %d us\n", PicWidthInSamplesRefLayerY, PicHeightInSamplesRefLayerY, PicWidthInSamplesCurLayerY, PicHeightInSamplesCurLayerY, duration);
 #endif
-} 
+}
+#endif
 
 void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src_stride, int16_t src_height,
                                                int16_t *dst, ptrdiff_t dst_stride, int dst_width, int dst_height,
@@ -582,8 +584,8 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
   int16_t  *tmpSample;
 
   // Calculate the position of the top left point in the reference
-  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int x_src = ((((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int y_src = ((((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
 
   assert(src_height >= 1);
   int processing_height = src_height + 3 + 4; // padding (3 on left, 4 on right)
@@ -1180,8 +1182,8 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
   int16_t  *tmpSample;
 
   // Calculate the position of the top left point in the reference
-  int x_src = (((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2] >> 4;  // (H 63)
-  int y_src = (((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3] >> 4;  // (H 64)
+  int x_src = ((((x_dst - position_params[0]) * position_params[4] + position_params[6] + (1 << 11)) >> 12) + position_params[2]) >> 4;  // (H 63)
+  int y_src = ((((y_dst - position_params[1]) * position_params[5] + position_params[7] + (1 << 11)) >> 12) + position_params[3]) >> 4;  // (H 64)
 
   assert(src_height >= 1);
   int processing_height = src_height + 1 + 3; // padding (1 on left, 2 on right)
