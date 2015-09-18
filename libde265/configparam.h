@@ -47,7 +47,7 @@ class option_base
 {
  public:
  option_base() : mShortOption(0), mLongOption(NULL) { }
- option_base(const char* name) : mShortOption(0), mLongOption(NULL), mIDName(name) { }
+ option_base(const char* name) : mIDName(name), mShortOption(0), mLongOption(NULL) { }
   virtual ~option_base() { }
 
 
@@ -94,7 +94,7 @@ class option_base
   bool hasLongOption() const { return true; } //mLongOption!=NULL; }
   std::string getLongOption() const { return mLongOption ? std::string(mLongOption) : get_name(); }
 
-  virtual bool processCmdLineArguments(char** argv, int* argc, int idx) { return false; }
+  virtual LIBDE265_API bool processCmdLineArguments(char** argv, int* argc, int idx) { return false; }
 
 
 
@@ -131,7 +131,7 @@ public:
   virtual std::string get_default_string() const { return default_value ? "true":"false"; }
 
   virtual std::string getTypeDescr() const { return "boolean"; }
-  virtual bool processCmdLineArguments(char** argv, int* argc, int idx) { value=true; return true; }
+  virtual LIBDE265_API bool processCmdLineArguments(char** argv, int* argc, int idx) { value=true; return true; }
 
   bool set(bool v) { value_set=true; value=v; return true; }
 
@@ -161,10 +161,10 @@ public:
   virtual bool has_default() const { return default_set; }
 
   void set_default(std::string v) { default_value=v; default_set=true; }
-  virtual std::string get_default_string() const { return default_value; }
+  virtual LIBDE265_API std::string get_default_string() const { return default_value; }
 
-  virtual std::string getTypeDescr() const { return "(string)"; }
-  virtual bool processCmdLineArguments(char** argv, int* argc, int idx);
+  virtual LIBDE265_API std::string getTypeDescr() const { return "(string)"; }
+  virtual LIBDE265_API bool processCmdLineArguments(char** argv, int* argc, int idx);
 
   bool set(std::string v) { value_set=true; value=v; return true; }
 
@@ -200,10 +200,10 @@ public:
   virtual bool has_default() const { return default_set; }
 
   void set_default(int v) { default_value=v; default_set=true; }
-  virtual std::string get_default_string() const;
+  virtual LIBDE265_API std::string get_default_string() const;
 
-  virtual std::string getTypeDescr() const;
-  virtual bool processCmdLineArguments(char** argv, int* argc, int idx);
+  virtual LIBDE265_API std::string getTypeDescr() const;
+  virtual LIBDE265_API bool processCmdLineArguments(char** argv, int* argc, int idx);
 
   bool set(int v) {
     if (is_valid(v)) { value_set=true; value=v; return true; }
@@ -238,7 +238,7 @@ public:
   virtual std::vector<std::string> get_choice_names() const = 0;
 
   virtual std::string getTypeDescr() const;
-  virtual bool processCmdLineArguments(char** argv, int* argc, int idx);
+  virtual LIBDE265_API bool processCmdLineArguments(char** argv, int* argc, int idx);
 
   const char** get_choices_string_table() const;
 
@@ -272,13 +272,19 @@ template <class T> class choice_option : public choice_option_base
   }
 
   void set_default(T val) {
-    for (auto c : choices)
+#ifdef FOR_LOOP_AUTO_SUPPORT
+    FOR_LOOP(auto, c, choices) {
+#else
+    for (typename std::vector< std::pair<std::string,T> >::const_iterator it=choices.begin(); it!=choices.end(); ++it) {
+      const std::pair<std::string,T> & c = *it;
+#endif
       if (c.second == val) {
         defaultID = val;
         defaultValue = c.first;
         default_set = true;
         return;
       }
+    }
 
     assert(false); // value does not exist
   }
@@ -361,10 +367,10 @@ class config_parameters
  config_parameters() : param_string_table(NULL) { }
   ~config_parameters() { delete[] param_string_table; }
 
-  void add_option(option_base* o);
+  void LIBDE265_API add_option(option_base* o);
 
-  void print_params() const;
-  bool parse_command_line_params(int* argc, char** argv, int* first_idx=NULL,
+  void LIBDE265_API print_params() const;
+  bool LIBDE265_API parse_command_line_params(int* argc, char** argv, int* first_idx=NULL,
                                  bool ignore_unknown_options=false);
 
 

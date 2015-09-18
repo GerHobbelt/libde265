@@ -72,6 +72,10 @@ extern "C" {
 LIBDE265_API const char *de265_get_version(void);
 LIBDE265_API uint32_t de265_get_version_number(void);
 
+LIBDE265_API int de265_get_version_number_major(void);
+LIBDE265_API int de265_get_version_number_minor(void);
+LIBDE265_API int de265_get_version_number_maintenance(void);
+
 
 /* === error codes === */
 
@@ -156,7 +160,7 @@ struct de265_image;
 
 enum de265_chroma {
   de265_chroma_mono=0,
-  de265_chroma_420=1,  // currently the only used format
+  de265_chroma_420=1,
   de265_chroma_422=2,
   de265_chroma_444=3
 };
@@ -168,6 +172,7 @@ LIBDE265_API int de265_get_image_width(const struct de265_image*,int channel);
 LIBDE265_API int de265_get_image_height(const struct de265_image*,int channel);
 LIBDE265_API enum de265_chroma de265_get_chroma_format(const struct de265_image*);
 LIBDE265_API int de265_get_bits_per_pixel(const struct de265_image*,int channel);
+/* The |out_stride| is returned as "bytes per line" if a non-NULL parameter is given. */
 LIBDE265_API const uint8_t* de265_get_image_plane(const struct de265_image*, int channel, int* out_stride);
 LIBDE265_API void* de265_get_image_plane_user_data(const struct de265_image*, int channel);
 LIBDE265_API de265_PTS de265_get_image_PTS(const struct de265_image*);

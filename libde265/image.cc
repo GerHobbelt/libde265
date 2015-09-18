@@ -47,7 +47,7 @@
 #elif _WIN32
 #define ALLOC_ALIGNED(alignment, size)         _aligned_malloc((size), (alignment))
 #define FREE_ALIGNED(mem)                      _aligned_free((mem))
-#elif __APPLE__
+#elif defined(HAVE_POSIX_MEMALIGN)
 static inline void *ALLOC_ALIGNED(size_t alignment, size_t size) {
     void *mem = NULL;
     if (posix_memalign(&mem, alignment, size) != 0) {
@@ -115,8 +115,8 @@ static int  de265_image_get_buffer(de265_decoder_context* ctx,
   assert(img->sps.BitDepth_Y >= 8 && img->sps.BitDepth_Y <= 16);
   assert(img->sps.BitDepth_C >= 8 && img->sps.BitDepth_C <= 16);
 
-  int luma_bpl   = luma_stride   * (img->sps.BitDepth_Y+7)/8;
-  int chroma_bpl = chroma_stride * (img->sps.BitDepth_C+7)/8;
+  int luma_bpl   = luma_stride   * ((img->sps.BitDepth_Y+7)/8);
+  int chroma_bpl = chroma_stride * ((img->sps.BitDepth_C+7)/8);
 
   int luma_height   = spec->height;
   int chroma_height = rawChromaHeight;
@@ -297,6 +297,10 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     chroma_width = (chroma_width+1)/2;
     break;
 
+  case de265_chroma_444:
+    spec.format = de265_image_format_YUV444P8;
+    break;
+
   case de265_chroma_mono:
     spec.format = de265_image_format_mono8;
     chroma_width = 0;
@@ -304,7 +308,7 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     break;
 
   default:
-    spec.format = de265_image_format_YUV422P8;
+    assert(false);
     break;
   }
 

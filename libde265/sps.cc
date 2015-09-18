@@ -518,9 +518,8 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   sps_temporal_mvp_enabled_flag = get_bits(br,1);
   strong_intra_smoothing_enable_flag = get_bits(br,1);
+
   vui_parameters_present_flag = get_bits(br,1);
-
-
   if (vui_parameters_present_flag) {
     vui.read(br, sps_max_sub_layers - 1);
   }
@@ -700,6 +699,7 @@ void seq_parameter_set::dump(int fd) const
 
   LOG1("seq_parameter_set_id    : %d\n", seq_parameter_set_id);
   LOG2("chroma_format_idc       : %d (%s)\n", chroma_format_idc,
+       chroma_format_idc == 0 ? "monochrome" :
        chroma_format_idc == 1 ? "4:2:0" :
        chroma_format_idc == 2 ? "4:2:2" :
        chroma_format_idc == 3 ? "4:4:4" : "unknown");
@@ -809,23 +809,8 @@ void seq_parameter_set::dump(int fd) const
     range_extension.dump(fd);
   }
 
-  return;
-
   if (vui_parameters_present_flag) {
-    assert(false);
-    /*
-      vui_parameters()
-
-        sps_extension_flag
-        u(1)
-        if( sps_extension_flag )
-
-          while( more_rbsp_data() )
-
-            sps_extension_data_flag
-              u(1)
-              rbsp_trailing_bits()
-    */
+    vui.dump(fd);
   }
 #undef LOG0
 #undef LOG1

@@ -19,13 +19,22 @@ if HAVE_VISIBILITY
 endif
 
 libde265_la_LDFLAGS = -version-info $(LIBDE265_CURRENT):$(LIBDE265_REVISION):$(LIBDE265_AGE)
-libde265_la_LIBADD = -lstdc++
 
 libde265_la_SOURCES = \
+  acceleration.h \
+  alloc_pool.h \
+  alloc_pool.cc \
   bitstream.cc \
+  bitstream.h \
   cabac.cc \
+  cabac.h \
+  configparam.cc \
+  configparam.h \
+  contextmodel.cc \
+  contextmodel.h \
   de265.cc \
   deblock.cc \
+  deblock.h \
   decctx.cc \
   decctx-multilayer.cc \
   nal-parser.cc \
@@ -52,17 +61,39 @@ libde265_la_SOURCES = \
   deblock.h \
   decctx.h \
   image.h \
+  image-io.h \
+  image-io.cc \
+  intrapred.cc \
   intrapred.h \
+  md5.cc \
   md5.h \
+  motion.cc \
+  motion.h \
+  nal.cc \
   nal.h \
+  nal-parser.cc \
+  nal-parser.h \
+  pps.cc \
   pps.h \
-  transform.h \
+  quality.cc \
+  quality.h \
+  refpic.cc \
   refpic.h \
+  sao.cc \
   sao.h \
+  scan.cc \
   scan.h \
+  sei.cc \
   sei.h \
+  slice.cc \
   slice.h \
+  sps.cc \
   sps.h \
+  threads.cc \
+  threads.h \
+  transform.cc \
+  transform.h \
+  util.cc \
   util.h \
   vui.cc vui.h \
   motion.cc motion.h \
@@ -80,7 +111,7 @@ libde265_la_SOURCES = \
   contextmodel.cc
 
 SUBDIRS = encoder
-libde265_la_LIBADD += encoder/libde265_encoder.la
+libde265_la_LIBADD = encoder/libde265_encoder.la
 
 if ENABLE_SSE_OPT
   SUBDIRS += x86
@@ -98,6 +129,7 @@ if MINGW
 endif
 
 EXTRA_DIST = Makefile.vc7 \
+  CMakeLists.txt \
   ../extra/stdbool.h \
   ../extra/stdint.h
 

@@ -30,6 +30,16 @@ struct video_parameter_set;
 struct video_parameter_set_extension;
 struct hrd_parameters;
 
+enum VideoFormat {
+  VideoFormat_Component = 0,
+  VideoFormat_PAL = 1,
+  VideoFormat_NTSC = 2,
+  VideoFormat_SECAM = 3,
+  VideoFormat_MAC = 4,
+  VideoFormat_Unspecified = 5
+};
+const char* get_video_format_name(enum VideoFormat);
+
 enum SAR_Inidcator {
   UNSPECIFIED = 0,
   SAR_1_1 = 1,
@@ -51,6 +61,7 @@ enum SAR_Inidcator {
   SAR_RESERVED = 17,
   SAR_EXTENDED = 255
 };
+const char* get_SAR_Indicator_name(enum SAR_Inidcator format);
 
 struct hrd_parameters;
 struct sub_layer_hrd_parameters {
@@ -95,8 +106,13 @@ struct hrd_parameters {
 
 // Video usability information as defined in Annex E
 // See Annex E JCTVC-R1013_v6
-struct video_usability_information {
+class video_usability_information 
+{
+public:
+  video_usability_information();
+
   de265_error read(bitreader *reader, int sps_max_sub_layers_minus1);
+  void dump(int fd) const;
 
   bool aspect_ratio_info_present_flag;
   SAR_Inidcator aspect_ratio_idc;
@@ -106,7 +122,7 @@ struct video_usability_information {
   bool overscan_info_present_flag;
   bool overscan_appropriate_flag;
   bool video_signal_type_present_flag;
-  int video_format;
+  VideoFormat video_format;
   bool video_full_range_flag;
   bool colour_description_present_flag;
   int colour_primaries;
