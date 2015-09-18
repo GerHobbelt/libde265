@@ -883,8 +883,8 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       r0 = _mm_add_epi32(r0, offset);
       r4 = _mm_add_epi32(r4, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r4 = _mm_srli_epi32(r4, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r4 = _mm_srai_epi32(r4, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       r4 = _mm_min_epi32(r4, clip8);
@@ -930,8 +930,8 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       r0 = _mm_add_epi32(r0, offset);
       r4 = _mm_add_epi32(r4, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r4 = _mm_srli_epi32(r4, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r4 = _mm_srai_epi32(r4, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       r4 = _mm_min_epi32(r4, clip8);
@@ -973,8 +973,8 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       r0 = _mm_add_epi32(r0, offset);
       r4 = _mm_add_epi32(r4, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r4 = _mm_srli_epi32(r4, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r4 = _mm_srai_epi32(r4, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       r4 = _mm_min_epi32(r4, clip8);
@@ -1014,8 +1014,8 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       r0 = _mm_add_epi32(r0, offset);
       r4 = _mm_add_epi32(r4, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r4 = _mm_srli_epi32(r4, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r4 = _mm_srai_epi32(r4, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       r4 = _mm_min_epi32(r4, clip8);
@@ -1050,7 +1050,7 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       // Add offset
       r0 = _mm_add_epi32(r0, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       // And shift left again by 6 bits
@@ -1082,7 +1082,7 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       // Add offset
       r0 = _mm_add_epi32(r0, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       // And shift left again by 6 bits
@@ -1109,7 +1109,7 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       // Add offset
       r0 = _mm_add_epi32(r0, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       // And shift left again by 6 bits
@@ -1134,7 +1134,7 @@ void resampling_process_of_luma_block_sse_8bit(const uint8_t *src, ptrdiff_t src
       // Add offset
       r0 = _mm_add_epi32(r0, offset);
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
       // And shift left again by 6 bits
@@ -1524,8 +1524,8 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r2 = _mm_add_epi32(r2, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r2 = _mm_srli_epi32(r2, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r2 = _mm_srai_epi32(r2, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1573,8 +1573,8 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r2 = _mm_add_epi32(r2, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r2 = _mm_srli_epi32(r2, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r2 = _mm_srai_epi32(r2, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1617,8 +1617,8 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r2 = _mm_add_epi32(r2, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r2 = _mm_srli_epi32(r2, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r2 = _mm_srai_epi32(r2, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1659,8 +1659,8 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r2 = _mm_add_epi32(r2, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
-      r2 = _mm_srli_epi32(r2, 12);
+      r0 = _mm_srai_epi32(r0, 12);
+      r2 = _mm_srai_epi32(r2, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1696,7 +1696,7 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r0 = _mm_add_epi32(r0, offset);
       
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1728,7 +1728,7 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r0 = _mm_add_epi32(r0, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1757,7 +1757,7 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r0 = _mm_add_epi32(r0, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
@@ -1784,7 +1784,7 @@ void resampling_process_of_chroma_block_sse_8bit(const uint8_t *src, ptrdiff_t s
       r0 = _mm_add_epi32(r0, offset);
 
       // Shift right by 12 bits
-      r0 = _mm_srli_epi32(r0, 12);
+      r0 = _mm_srai_epi32(r0, 12);
 
       // Clip to 255
       r0 = _mm_min_epi32(r0, clip8);
