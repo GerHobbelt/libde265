@@ -19,6 +19,10 @@
  * along with libde265.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <emmintrin.h>
 #include <tmmintrin.h> // SSSE3
 #if HAVE_SSE4_1
