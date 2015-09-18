@@ -172,6 +172,7 @@ public:
 
   char sps_temporal_mvp_enabled_flag;
   char strong_intra_smoothing_enable_flag;
+
   char vui_parameters_present_flag;
 
   video_usability_information vui;
