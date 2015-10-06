@@ -930,6 +930,17 @@ public:
   // --- value logging ---
 
   void printBlk(int x0,int y0, int cIdx, int log2BlkSize);
+
+  // --- functions for retrieving internals ---
+
+  void internals_get_sliceIdx(uint16_t *idxArray) const
+  {
+	  for (int i = 0; i < ctb_info.size(); i++)
+	  {
+		  idxArray[i] = ctb_info[i].SliceAddrRS;
+	  }
+  }
+
 };
 
 
