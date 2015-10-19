@@ -933,6 +933,13 @@ public:
 
   // --- functions for retrieving internals ---
 
+  void internals_get_CTB_Info_Layout(int *widthInUnits, int *heightInUnits, int *log2UnitSize) const
+  {
+	  *widthInUnits = ctb_info.width_in_units;
+	  *heightInUnits = ctb_info.height_in_units;
+	  *log2UnitSize = ctb_info.log2unitSize;
+  }
+
   void internals_get_sliceIdx(uint16_t *idxArray) const
   {
 	  for (int i = 0; i < ctb_info.size(); i++)
@@ -941,6 +948,133 @@ public:
 	  }
   }
 
+  void internals_get_CB_Info_Layout(int *widthInUnits, int *heightInUnits, int *log2UnitSize) const
+  {
+	*widthInUnits = cb_info.width_in_units;
+	*heightInUnits = cb_info.height_in_units;
+	*log2UnitSize = cb_info.log2unitSize;
+  }
+
+  /* Get the coding block info. The values are stored in the following way:
+   * This function returns an array of values, sorted in a grid.
+   * You can get the layout of the grid by calling internals_get_CB_Info_Layout.
+   * The values are then arranged in a raster scan so the conversion from 
+   * a unit position (x,y) to an index is: y*widthInUnits+x
+
+   * Each value in this array contains the following infomation:
+   * Bits 0:2 - The cb size in log2 pixels. Every CB can span multiple values in this array.
+                Only the top left most unit contains a value. All others are set to 0. (3 Bits)
+   * Bits 3:5 - The part size (3 Bits)
+   * Bits 6:7 - The prediction mode (0: INTRA, 1: INTER, 2: SKIP) (2 Bits)
+   * Bit  8   - PCM flag (1 Bit)
+   * Bit  9   - CU Transquant bypass flag (1 Bit)
+  */
+  void internals_get_CB_info(uint16_t *idxArray) const
+  {
+	  for (int i = 0; i < cb_info.size(); i++)
+	  {
+		  uint16_t ret_val = 0;
+		  CB_ref_info cb_inf = cb_info[i];
+
+		  int size = cb_inf.log2CbSize;
+		  assert( size >= 0 && size < 8 );  // 3 bits
+		  ret_val = size;
+
+		  int partMode = cb_inf.PartMode;
+		  assert( partMode >= 0 && partMode < 8 );  // 3 bits
+		  ret_val |= (partMode << 3);
+
+		  int predMode = cb_inf.PredMode;
+		  assert( predMode == 0 || predMode == 1 || predMode == 2 );
+		  ret_val |= (predMode << 6);
+
+		  bool pcmFlag = cb_inf.pcm_flag;
+		  if (pcmFlag)
+			  ret_val |= 256;	// Set bit 8
+
+		  bool bCUTransQuantBypass = cb_inf.cu_transquant_bypass;
+		  if (bCUTransQuantBypass )
+			  ret_val |= 512;	// Set bit 9
+
+		  idxArray[i] = ret_val;
+	  }
+  }
+
+  void internals_get_PB_Info_layout(int *widthInUnits, int *heightInUnits, int *log2UnitSize) const
+  {
+	*widthInUnits = pb_info.width_in_units;
+	*heightInUnits = pb_info.height_in_units;
+	*log2UnitSize = pb_info.log2unitSize;
+  }
+
+  // Get pb info (prediction flags, reference indices and motion vectors)
+  // if the refIdx is -1, the reference is unused
+  void internals_get_PB_info(int8_t *refIdx0, int8_t *refIdx1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) const
+  {
+	  for (int i = 0; i < pb_info.size(); i++)
+	  {
+		  MotionVectorSpec mv = pb_info[i].mv;
+		  if (mv.predFlag[0] != 1) {
+			  // No predictin info for this block
+			  refIdx0[i] = -1;
+			  x0[i] = 0;
+			  y0[i] = 0;
+		  }
+		  else {
+			  refIdx0[i] = mv.refIdx[0];
+			  x0[i] = mv.mv[0].x;
+			  y0[i] = mv.mv[0].y;
+		  }
+
+		  if (mv.predFlag[1] != 1) {
+			  // No predictin info for this block
+			  refIdx1[i] = -1;
+			  x1[i] = 0;
+			  y1[i] = 0;
+		  }
+		  else {
+			  refIdx1[i] = mv.refIdx[1];
+			  x1[i] = mv.mv[1].x;
+			  y1[i] = mv.mv[1].y;
+		  }
+	  }
+  }
+
+  // Get intra direction metadata array layout
+  void internals_get_IntraDir_Info_Layer(int *widthInUnits, int *heightInUnits, int *log2UnitSize) const
+  {
+	*widthInUnits = intraPredMode.width_in_units;
+	*heightInUnits = intraPredMode.height_in_units;
+	*log2UnitSize = intraPredMode.log2unitSize;
+  }
+
+  // Get the luma and chroma intra dir array
+  void internals_get_intraDir_info(uint8_t *intraDir, uint8_t *intraDirChroma) const
+  {
+	  for (int i = 0; i < intraPredMode.size(); i++)
+	  {
+		  intraDir[i] = intraPredMode[i];
+		  intraDirChroma[i] = intraPredModeC[i];
+	  }
+  }
+
+  // Get intra direction metadata array layout
+  void internals_get_TUInfo_Info_layout(int *widthInUnits, int *heightInUnits, int *log2UnitSize) const
+  {
+	*widthInUnits = tu_info.width_in_units;
+	*heightInUnits = tu_info.height_in_units;
+	*log2UnitSize = tu_info.log2unitSize;
+  }
+
+  // Get the luma and chroma intra dir array
+  void internals_get_TUInfo_info(uint8_t *tuInfo) const
+  {
+	  for (int i = 0; i < tu_info.size(); i++)
+	  {
+		  tuInfo[i] = tu_info[i];
+	  }
+  }
+  
 };
 
 

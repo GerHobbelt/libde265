@@ -21,12 +21,52 @@
 #include "de265_internals.h"
 #include "image.h"
 
-LIBDE265_API int de265_internals_get_numCTB(const struct de265_image* img)
+LIBDE265_API void de265_internals_get_CTB_Info_Layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
 {
-	return img->number_of_ctbs();
+	img->internals_get_CTB_Info_Layout(widthInUnits, heightInUnits, log2UnitSize);
 }
 
 LIBDE265_API void de265_internals_get_CTB_sliceIdx(const struct de265_image *img, uint16_t *idxArray)
 {
 	img->internals_get_sliceIdx(idxArray);
+}
+
+LIBDE265_API void de265_internals_get_CB_Info_Layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
+{
+	img->internals_get_CB_Info_Layout(widthInUnits, heightInUnits, log2UnitSize);
+}
+
+LIBDE265_API void de265_internals_get_CB_info(const struct de265_image *img, uint16_t *idxArray)
+{
+	img->internals_get_CB_info(idxArray);
+}
+
+LIBDE265_API void de265_internals_get_PB_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
+{
+	img->internals_get_PB_Info_layout(widthInUnits, heightInUnits, log2UnitSize);
+}
+
+LIBDE265_API void de265_internals_get_PB_info(const struct de265_image *img, int8_t *refIdx0, int8_t *refIdx1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1)
+{
+	img->internals_get_PB_info(refIdx0, refIdx1, x0, y0, x1, y1);
+}
+
+LIBDE265_API void de265_internals_get_IntraDir_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
+{
+	img->internals_get_IntraDir_Info_Layer(widthInUnits, heightInUnits, log2UnitSize);
+}
+
+LIBDE265_API void de265_internals_get_intraDir_info(const struct de265_image *img, uint8_t *intraDir, uint8_t *intraDirChroma)
+{
+	img->internals_get_intraDir_info(intraDir, intraDirChroma);
+}
+
+LIBDE265_API void de265_internals_get_TUInfo_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
+{
+	img->internals_get_TUInfo_Info_layout(widthInUnits, heightInUnits, log2UnitSize);
+}
+
+LIBDE265_API void de265_internals_get_TUInfo_info(const struct de265_image *img, uint8_t *tuInfo)
+{
+	img->internals_get_TUInfo_info(tuInfo);
 }
