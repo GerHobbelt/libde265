@@ -33,6 +33,7 @@ libde265_la_SOURCES = \
   contextmodel.cc \
   contextmodel.h \
   de265.cc \
+  de265_internals.cc \
   deblock.cc \
   deblock.h \
   decctx.cc \
@@ -135,4 +136,5 @@ EXTRA_DIST = Makefile.vc7 \
 
 libde265_la_HEADERS = \
   de265.h \
+  de265_internals.h \
   de265-version.h
