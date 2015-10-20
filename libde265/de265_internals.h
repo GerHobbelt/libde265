@@ -89,7 +89,7 @@ LIBDE265_API void de265_internals_get_CB_info(const struct de265_image *img, uin
 LIBDE265_API void de265_internals_get_PB_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize);
 
 /// Get the prediction block info (motion information) 
-LIBDE265_API void de265_internals_get_PB_info(const struct de265_image *img, int8_t *refIdx0, int8_t *refIdx1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1);
+LIBDE265_API void de265_internals_get_PB_info(const struct de265_image *img, int16_t *refPOC0, int16_t *refPOC1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1);
 
 /// Get intra direction array layout
 LIBDE265_API void de265_internals_get_IntraDir_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize);

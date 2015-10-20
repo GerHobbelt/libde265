@@ -46,9 +46,9 @@ LIBDE265_API void de265_internals_get_PB_Info_layout(const struct de265_image *i
 	img->internals_get_PB_Info_layout(widthInUnits, heightInUnits, log2UnitSize);
 }
 
-LIBDE265_API void de265_internals_get_PB_info(const struct de265_image *img, int8_t *refIdx0, int8_t *refIdx1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1)
+LIBDE265_API void de265_internals_get_PB_info(const struct de265_image *img, int16_t *refPOC0, int16_t *refPOC1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1)
 {
-	img->internals_get_PB_info(refIdx0, refIdx1, x0, y0, x1, y1);
+	img->internals_get_PB_info(refPOC0, refPOC1, x0, y0, x1, y1);
 }
 
 LIBDE265_API void de265_internals_get_IntraDir_Info_layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)

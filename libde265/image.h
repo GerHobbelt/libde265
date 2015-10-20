@@ -1009,31 +1009,51 @@ public:
 
   // Get pb info (prediction flags, reference indices and motion vectors)
   // if the refIdx is -1, the reference is unused
-  void internals_get_PB_info(int8_t *refIdx0, int8_t *refIdx1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) const
+  void internals_get_PB_info(int16_t *refPOC0, int16_t *refPOC1, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) const
   {
 	  for (int i = 0; i < pb_info.size(); i++)
 	  {
 		  MotionVectorSpec mv = pb_info[i].mv;
+
+		  // Get X/Y
+		  int pbSizePix = (1 << pb_info.log2unitSize);
+		  int iXPix = (i % pb_info.width_in_units) * pbSizePix;
+		  int iYPix = (i / pb_info.width_in_units) * pbSizePix;
+		  
+		  // Get slice header
+		  int shdr_idx = get_SliceHeaderIndex(iXPix, iYPix);
+		  int refPOC[2] = {0,0};
+		  if (shdr_idx < slices.size()) {
+			  // Slice found
+			  slice_segment_header *shrd = slices[shdr_idx];
+			  
+			  // Get reference POCs
+			  if (mv.refIdx[0] >= 0 && mv.refIdx[0] < 16)
+				refPOC[0] = shrd->RefPicList_POC[0][mv.refIdx[0]];
+			  if (mv.refIdx[1] >= 0 && mv.refIdx[1] < 16)
+				refPOC[1] = shrd->RefPicList_POC[1][mv.refIdx[1]];
+		  }
+
 		  if (mv.predFlag[0] != 1) {
 			  // No predictin info for this block
-			  refIdx0[i] = -1;
+			  refPOC0[i] = -1;
 			  x0[i] = 0;
 			  y0[i] = 0;
 		  }
 		  else {
-			  refIdx0[i] = mv.refIdx[0];
+			  refPOC0[i] = refPOC[0];
 			  x0[i] = mv.mv[0].x;
 			  y0[i] = mv.mv[0].y;
 		  }
 
 		  if (mv.predFlag[1] != 1) {
 			  // No predictin info for this block
-			  refIdx1[i] = -1;
+			  refPOC1[i] = -1;
 			  x1[i] = 0;
 			  y1[i] = 0;
 		  }
 		  else {
-			  refIdx1[i] = mv.refIdx[1];
+			  refPOC1[i] = refPOC[1];
 			  x1[i] = mv.mv[1].x;
 			  y1[i] = mv.mv[1].y;
 		  }
