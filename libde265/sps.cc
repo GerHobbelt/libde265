@@ -288,7 +288,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   else {
     // --- decode chroma type ---
 
-    READ_VLC(chroma_format_idc, uvlc);
+  READ_VLC(chroma_format_idc, uvlc);
 
     if (chroma_format_idc == 3) {
       separate_colour_plane_flag = get_bits(br,1);
@@ -559,12 +559,19 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 }
 
 
-de265_error seq_parameter_set::compute_derived_values()
+de265_error seq_parameter_set::compute_derived_values(bool sanitize_values)
 {
   // --- compute derived values ---
 
   SubWidthC  = SubWidthC_tab [chroma_format_idc];
   SubHeightC = SubHeightC_tab[chroma_format_idc];
+
+  if (separate_colour_plane_flag) {
+    ChromaArrayType = 0;
+  }
+  else {
+    ChromaArrayType = chroma_format_idc;
+  }
 
   if (ChromaArrayType==0) {
     WinUnitX = 1;
@@ -607,8 +614,35 @@ de265_error seq_parameter_set::compute_derived_values()
   Log2MinTrafoSize = log2_min_transform_block_size;
   Log2MaxTrafoSize = log2_min_transform_block_size + log2_diff_max_min_transform_block_size;
 
-  if (max_transform_hierarchy_depth_inter > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
-  if (max_transform_hierarchy_depth_intra > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (max_transform_hierarchy_depth_inter > Log2CtbSizeY - Log2MinTrafoSize) {
+    if (sanitize_values) {
+      max_transform_hierarchy_depth_inter = Log2CtbSizeY - Log2MinTrafoSize;
+    } else {
+      fprintf(stderr,"SPS error: transform hierarchy depth (inter) > CTB size - min TB size\n");
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+
+  if (max_transform_hierarchy_depth_intra > Log2CtbSizeY - Log2MinTrafoSize) {
+    if (sanitize_values) {
+      max_transform_hierarchy_depth_intra = Log2CtbSizeY - Log2MinTrafoSize;
+    } else {
+      fprintf(stderr,"SPS error: transform hierarchy depth (intra) > CTB size - min TB size\n");
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+
+
+  if (sanitize_values) {
+    if (max_transform_hierarchy_depth_inter < Log2CtbSizeY - Log2MaxTrafoSize) {
+      max_transform_hierarchy_depth_inter = Log2CtbSizeY - Log2MaxTrafoSize;
+    }
+
+    if (max_transform_hierarchy_depth_intra < Log2CtbSizeY - Log2MaxTrafoSize) {
+      max_transform_hierarchy_depth_intra = Log2CtbSizeY - Log2MaxTrafoSize;
+    }
+  }
+
 
   Log2MinPUSize = Log2MinCbSizeY-1;
   PicWidthInMinPUs  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinPUSize);
@@ -643,23 +677,28 @@ de265_error seq_parameter_set::compute_derived_values()
   if (pic_width_in_luma_samples  % MinCbSizeY != 0 ||
       pic_height_in_luma_samples % MinCbSizeY != 0) {
     // TODO: warn that image size is coded wrong in bitstream (must be multiple of MinCbSizeY)
+    fprintf(stderr,"SPS error: CB alignment\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MinTrafoSize > Log2MinCbSizeY) {
+    fprintf(stderr,"SPS error: TB > CB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MaxTrafoSize > libde265_min(Log2CtbSizeY,5)) {
+    fprintf(stderr,"SPS error: TB_max > 32 or CTB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
 
   if (BitDepth_Y < 8 || BitDepth_Y > 16) {
+    fprintf(stderr,"SPS error: bitdepth Y not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (BitDepth_C < 8 || BitDepth_C > 16) {
+    fprintf(stderr,"SPS error: bitdepth C not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 

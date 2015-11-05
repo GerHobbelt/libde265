@@ -106,17 +106,17 @@ LIBDE265_API void de265_free_image_plane(struct de265_image* img, int cIdx)
 static int  de265_image_get_buffer(de265_decoder_context* ctx,
                                    de265_image_spec* spec, de265_image* img, void* userdata)
 {
-  const int rawChromaWidth  = spec->width  / img->sps.SubWidthC;
-  const int rawChromaHeight = spec->height / img->sps.SubHeightC;
+  const int rawChromaWidth  = spec->width  / img->SubWidthC;
+  const int rawChromaHeight = spec->height / img->SubHeightC;
 
   int luma_stride   = (spec->width    + spec->alignment-1) / spec->alignment * spec->alignment;
   int chroma_stride = (rawChromaWidth + spec->alignment-1) / spec->alignment * spec->alignment;
 
-  assert(img->sps.BitDepth_Y >= 8 && img->sps.BitDepth_Y <= 16);
-  assert(img->sps.BitDepth_C >= 8 && img->sps.BitDepth_C <= 16);
+  assert(img->BitDepth_Y >= 8 && img->BitDepth_Y <= 16);
+  assert(img->BitDepth_C >= 8 && img->BitDepth_C <= 16);
 
-  int luma_bpl   = luma_stride   * ((img->sps.BitDepth_Y+7)/8);
-  int chroma_bpl = chroma_stride * ((img->sps.BitDepth_C+7)/8);
+  int luma_bpl   = luma_stride   * ((img->BitDepth_Y+7)/8);
+  int chroma_bpl = chroma_stride * ((img->BitDepth_C+7)/8);
 
   int luma_height   = spec->height;
   int chroma_height = rawChromaHeight;
@@ -237,7 +237,7 @@ de265_image::de265_image()
 
 
 de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
-                                     const seq_parameter_set* sps, bool allocMetadata,
+                                     std::shared_ptr<const seq_parameter_set> sps, bool allocMetadata,
                                      decoder_context* dctx,
                                      encoder_context* ectx,
                                      de265_PTS pts, void* user_data,
@@ -245,9 +245,9 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
                                      bool interLayerReferencePicture)
 {
   //if (allocMetadata) { assert(sps); }
-  assert(sps);
+  if (allocMetadata) { assert(sps); }
 
-  this->sps = *sps;
+  if (sps) { this->sps = sps; }
 
   release(); /* TODO: review code for efficient allocation when arrays are already
                 allocated to the requested size. Without the release, the old image-data
@@ -290,26 +290,39 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     spec.format = de265_image_format_YUV420P8;
     chroma_width  = (chroma_width +1)/2;
     chroma_height = (chroma_height+1)/2;
+    SubWidthC  = 2;
+    SubHeightC = 2;
     break;
 
   case de265_chroma_422:
     spec.format = de265_image_format_YUV422P8;
     chroma_width = (chroma_width+1)/2;
+    SubWidthC  = 2;
+    SubHeightC = 1;
     break;
 
   case de265_chroma_444:
     spec.format = de265_image_format_YUV444P8;
+    SubWidthC  = 1;
+    SubHeightC = 1;
     break;
 
   case de265_chroma_mono:
     spec.format = de265_image_format_mono8;
     chroma_width = 0;
     chroma_height= 0;
+    SubWidthC  = 1;
+    SubHeightC = 1;
     break;
 
   default:
     assert(false);
     break;
+  }
+
+  if (sps) {
+    assert(sps->SubWidthC  == SubWidthC);
+    assert(sps->SubHeightC == SubHeightC);
   }
 
   spec.width  = w;
@@ -338,8 +351,11 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
   spec.visible_height= height_confwin;
 
 
-  bpp_shift[0] = (sps->BitDepth_Y > 8) ? 1 : 0;
-  bpp_shift[1] = (sps->BitDepth_C > 8) ? 1 : 0;
+  BitDepth_Y = (sps==NULL) ? 8 : sps->BitDepth_Y;
+  BitDepth_C = (sps==NULL) ? 8 : sps->BitDepth_C;
+
+  bpp_shift[0] = (BitDepth_Y <= 8) ? 0 : 1;
+  bpp_shift[1] = (BitDepth_C <= 8) ? 0 : 1;
   bpp_shift[2] = bpp_shift[1];
 
   if (interLayerReferencePicture) {
@@ -517,7 +533,7 @@ de265_error de265_image::copy_image(const de265_image* src)
      Another option would be to safe the copied data not in an de265_image at all.
   */
 
-  de265_error err = alloc_image(src->width, src->height, src->chroma_format, &src->sps, false,
+  de265_error err = alloc_image(src->width, src->height, src->chroma_format, src->sps, false,
                                 src->decctx, src->encctx, src->pts, src->user_data, false);
   if (err != DE265_OK) {
     return err;
@@ -567,8 +583,8 @@ void de265_image::copy_lines_from(const de265_image* src, int first, int end)
   assert(first % 2 == 0);
   assert(end   % 2 == 0);
 
-  int luma_bpp   = (sps.BitDepth_Y+7)/8;
-  int chroma_bpp = (sps.BitDepth_C+7)/8;
+  int luma_bpp   = (sps->BitDepth_Y+7)/8;
+  int chroma_bpp = (sps->BitDepth_C+7)/8;
 
   if (src->stride == stride) {
     memcpy(pixels[0]      + first*stride * luma_bpp,
@@ -583,8 +599,8 @@ void de265_image::copy_lines_from(const de265_image* src, int first, int end)
     }
   }
 
-  int first_chroma = first / src->sps.SubHeightC;
-  int end_chroma   = end / src->sps.SubHeightC;
+  int first_chroma = first / src->SubHeightC;
+  int end_chroma   = end   / src->SubHeightC;
 
   if (src->chroma_format != de265_chroma_mono) {
     if (src->chroma_stride == chroma_stride) {
@@ -846,7 +862,7 @@ void de265_image::thread_finishes(const thread_task* task)
 
 void de265_image::wait_for_progress(thread_task* task, int ctbx,int ctby, int progress)
 {
-  const int ctbW = sps.PicWidthInCtbsY;
+  const int ctbW = sps->PicWidthInCtbsY;
 
   wait_for_progress(task, ctbx + ctbW*ctby, progress);
 }
@@ -908,7 +924,7 @@ void de265_image::clear_metadata()
 }
 
 
-void de265_image::set_mv_info(int x,int y, int nPbW,int nPbH, const MotionVectorSpec& mv)
+void de265_image::set_mv_info(int x,int y, int nPbW,int nPbH, const PBMotion& mv)
 {
   assert(!bIlRefPic);
   int log2PuSize = 2;
@@ -923,7 +939,7 @@ void de265_image::set_mv_info(int x,int y, int nPbW,int nPbH, const MotionVector
   for (int pby=0;pby<hPu;pby++)
     for (int pbx=0;pbx<wPu;pbx++)
       {
-        pb_info[ xPu+pbx + (yPu+pby)*stride ].mv = mv;
+        pb_info[ xPu+pbx + (yPu+pby)*stride ] = mv;
       }
 }
 
@@ -949,28 +965,28 @@ void de265_image::set_pred_mode(int x, int y, int nPbW, int nPbH, enum PredMode 
 bool de265_image::available_zscan(int xCurr,int yCurr, int xN,int yN) const
 {
   if (xN<0 || yN<0) return false;
-  if (xN>=sps.pic_width_in_luma_samples ||
-      yN>=sps.pic_height_in_luma_samples) return false;
+  if (xN>=sps->pic_width_in_luma_samples ||
+      yN>=sps->pic_height_in_luma_samples) return false;
 
-  int minBlockAddrN = pps.MinTbAddrZS[ (xN>>sps.Log2MinTrafoSize) +
-                                       (yN>>sps.Log2MinTrafoSize) * sps.PicWidthInTbsY ];
-  int minBlockAddrCurr = pps.MinTbAddrZS[ (xCurr>>sps.Log2MinTrafoSize) +
-                                          (yCurr>>sps.Log2MinTrafoSize) * sps.PicWidthInTbsY ];
+  int minBlockAddrN = pps->MinTbAddrZS[ (xN>>sps->Log2MinTrafoSize) +
+                                        (yN>>sps->Log2MinTrafoSize) * sps->PicWidthInTbsY ];
+  int minBlockAddrCurr = pps->MinTbAddrZS[ (xCurr>>sps->Log2MinTrafoSize) +
+                                           (yCurr>>sps->Log2MinTrafoSize) * sps->PicWidthInTbsY ];
 
   if (minBlockAddrN > minBlockAddrCurr) return false;
 
-  int xCurrCtb = xCurr >> sps.Log2CtbSizeY;
-  int yCurrCtb = yCurr >> sps.Log2CtbSizeY;
-  int xNCtb = xN >> sps.Log2CtbSizeY;
-  int yNCtb = yN >> sps.Log2CtbSizeY;
+  int xCurrCtb = xCurr >> sps->Log2CtbSizeY;
+  int yCurrCtb = yCurr >> sps->Log2CtbSizeY;
+  int xNCtb = xN >> sps->Log2CtbSizeY;
+  int yNCtb = yN >> sps->Log2CtbSizeY;
 
   if (get_SliceAddrRS(xCurrCtb,yCurrCtb) !=
       get_SliceAddrRS(xNCtb,   yNCtb)) {
     return false;
   }
 
-  if (pps.TileIdRS[xCurrCtb + yCurrCtb*sps.PicWidthInCtbsY] !=
-      pps.TileIdRS[xNCtb    + yNCtb   *sps.PicWidthInCtbsY]) {
+  if (pps->TileIdRS[xCurrCtb + yCurrCtb*sps->PicWidthInCtbsY] !=
+      pps->TileIdRS[xNCtb    + yNCtb   *sps->PicWidthInCtbsY]) {
     return false;
   }
 
@@ -1004,7 +1020,7 @@ bool de265_image::available_pred_blk(int xC,int yC, int nCbS, int xP, int yP,
   return availableN;
 }
 
-MotionVectorSpec de265_image::get_mv_info_lower_layer(int x, int y) const
+const PBMotion& de265_image::get_mv_info_lower_layer(int x, int y) const
 {
   assert(ilRefPic != NULL);
 
@@ -1045,9 +1061,9 @@ MotionVectorSpec de265_image::get_mv_info_lower_layer(int x, int y) const
   }
 
   // 5. Upsample the motion vectors and prediction flags
-  MotionVectorSpec mv_dst;
+  PBMotion mv_dst;
   if (rsPredMode != MODE_INTRA) {
-    const MotionVectorSpec mv_src = ilRefPic->get_mv_info(xRL, yRL);
+    const PBMotion mv_src = ilRefPic->get_mv_info(xRL, yRL);
     // For X being each of 0 and 1...
     for (int l=0; l<2; l++) {
       // RefIdx, predFlag

@@ -35,6 +35,8 @@
 #include "libde265/acceleration.h"
 #include "libde265/nal-parser.h"
 
+#include <memory>
+
 #define DE265_MAX_VPS_SETS 16   // this is the maximum as defined in the standard
 #define DE265_MAX_SPS_SETS 16   // this is the maximum as defined in the standard
 #define DE265_MAX_PPS_SETS 64   // this is the maximum as defined in the standard
@@ -61,7 +63,7 @@ public:
 
   // motion vectors
 
-  motion_spec motion;
+  PBMotionCoding motion;
 
 
   // prediction
@@ -297,11 +299,14 @@ class decoder_context : public base_context {
 
   void reset();
 
+  bool has_sps(int id) const { return (bool)sps[id]; }
+  bool has_pps(int id) const { return (bool)pps[id]; }
+
       video_parameter_set* get_vps(int id);
-  /* */ seq_parameter_set* get_sps(int id)       { return &sps[id]; }
-  const seq_parameter_set* get_sps(int id) const { return &sps[id]; }
-  /* */ pic_parameter_set* get_pps(int id)       { return &pps[id]; }
-  const pic_parameter_set* get_pps(int id) const { return &pps[id]; }
+  /* */ seq_parameter_set* get_sps(int id)       { return sps[id].get(); }
+  const seq_parameter_set* get_sps(int id) const { return sps[id].get(); }
+  /* */ pic_parameter_set* get_pps(int id)       { return pps[id].get(); }
+  const pic_parameter_set* get_pps(int id) const { return pps[id].get(); }
 
   /*
   const slice_segment_header* get_SliceHeader_atCtb(int ctb) {
@@ -325,11 +330,8 @@ class decoder_context : public base_context {
 
 
   void process_nal_hdr(nal_header*);
-  void process_vps(video_parameter_set*);
-  void process_sps(seq_parameter_set*);
-  void process_pps(pic_parameter_set*);
 
-  bool process_slice_segment_header(decoder_context*, slice_segment_header*,
+  bool process_slice_segment_header(slice_segment_header*,
                                     de265_error*, de265_PTS pts,
                                     nal_header* nal_hdr, void* user_data);
 
@@ -399,13 +401,13 @@ class decoder_context : public base_context {
   decoder_context_multilayer *ml_decoder;
   video_parameter_set *last_vps;    // A pointer to the most recently parsed VPS
 
-  video_parameter_set  vps[ DE265_MAX_VPS_SETS ];
-  seq_parameter_set    sps[ DE265_MAX_SPS_SETS ];
-  pic_parameter_set    pps[ DE265_MAX_PPS_SETS ];
+  std::shared_ptr<video_parameter_set>  vps[ DE265_MAX_VPS_SETS ];
+  std::shared_ptr<seq_parameter_set>    sps[ DE265_MAX_SPS_SETS ];
+  std::shared_ptr<pic_parameter_set>    pps[ DE265_MAX_PPS_SETS ];
 
-  video_parameter_set* current_vps;
-  seq_parameter_set*   current_sps;
-  pic_parameter_set*   current_pps;
+  std::shared_ptr<video_parameter_set>  current_vps;
+  std::shared_ptr<seq_parameter_set>    current_sps;
+  std::shared_ptr<pic_parameter_set>    current_pps;
 
  public:
   thread_pool thread_pool_;
@@ -536,11 +538,11 @@ class decoder_context : public base_context {
                                      slice_unit* sliceunit,
                                      int progress);
 
-  void process_picture_order_count(decoder_context* ctx, slice_segment_header* hdr);
-  int generate_unavailable_reference_picture(decoder_context* ctx, const seq_parameter_set* sps,
+  void process_picture_order_count(slice_segment_header* hdr);
+  int generate_unavailable_reference_picture(const seq_parameter_set* sps,
                                              int POC, bool longTerm);
-  void process_reference_picture_set(decoder_context* ctx, slice_segment_header* hdr);
-  bool construct_reference_picture_lists(decoder_context* ctx, slice_segment_header* hdr);
+  void process_reference_picture_set(slice_segment_header* hdr);
+  bool construct_reference_picture_lists(slice_segment_header* hdr);
 
 
   void remove_images_from_dpb(const std::vector<int>& removeImageList);
@@ -548,8 +550,8 @@ class decoder_context : public base_context {
   void run_postprocessing_filters_parallel(image_unit* img);
 
   // Multilayer extension
-  void process_inter_layer_reference_picture_set(decoder_context* ctx, slice_segment_header* hdr);
-  void derive_inter_layer_reference_picture(decoder_context* ctx, de265_image* rlPic, int rLId, int ilRefPicIdx);
+  void process_inter_layer_reference_picture_set(slice_segment_header* hdr);
+  void derive_inter_layer_reference_picture(de265_image* rlPic, int rLId, int ilRefPicIdx);
 };
 
 
