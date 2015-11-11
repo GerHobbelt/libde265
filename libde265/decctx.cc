@@ -556,6 +556,7 @@ de265_error decoder_context::read_vps_NAL(bitreader& reader)
   }
 
   vps[ new_vps->video_parameter_set_id ] = new_vps;
+  last_vps = new_vps;
 
   return DE265_OK;
 }
@@ -2075,10 +2076,17 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
      3) long term
   */
 
-  int rIdx=0;
+    int rIdx=0;
   while (rIdx < NumRpsCurrTempList0) {
     for (int i=0;i<NumPocStCurrBefore && rIdx<NumRpsCurrTempList0; rIdx++,i++)
       RefPicListTemp0[rIdx] = RefPicSetStCurrBefore[i];
+
+    // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-64)
+    for (int i = 0; i<NumActiveRefLayerPics0; rIdx++, i++) {
+      RefPicListTemp0[rIdx] = RefPicSetInterLayer0[i];
+      isInterLayer[0][rIdx] = true;
+      isLongTerm[0][rIdx] = true; // IL-pred picture is marked as long term reference
+    }
 
     for (int i=0;i<NumPocStCurrAfter && rIdx<NumRpsCurrTempList0; rIdx++,i++)
       RefPicListTemp0[rIdx] = RefPicSetStCurrAfter[i];
@@ -2118,7 +2126,14 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
     hdr->InterLayerRefPic[0][rIdx] = isInterLayer[0][idx];
 
     // remember POC of referenced image (needed in motion.c, derive_collocated_motion_vector)
-    de265_image* img_0_rIdx = dpb.get_image(hdr->RefPicList[0][rIdx]);
+    de265_image* img_0_rIdx = NULL;
+    if (hdr->InterLayerRefPic[0][rIdx]) {
+      // Get the inter layer reference from ilRefPic
+      img_0_rIdx = ilRefPic[hdr->RefPicList[0][rIdx]];
+    }
+    else {
+      img_0_rIdx = dpb.get_image(hdr->RefPicList[0][rIdx]);
+    }
     if (img_0_rIdx==NULL) {
       return false;
     }
@@ -2139,6 +2154,13 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
     while (rIdx < NumRpsCurrTempList1) {
       for (int i=0;i<NumPocStCurrAfter && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = RefPicSetStCurrAfter[i];
+      }
+
+      // Multi layer extension (JCTVC-R1013_v6 F.8.3.4 F-66)
+      for( int i=0;i<NumActiveRefLayerPics1; rIdx++, i++ ) {
+        RefPicListTemp1[rIdx] = RefPicSetInterLayer1[ i ];
+        isInterLayer[1][rIdx] = true;
+        isLongTerm[1][rIdx] = true; // IL-pred picture is marked as long term reference
       }
 
       for (int i=0;i<NumPocStCurrBefore && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
@@ -2165,9 +2187,9 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
     }
 
     if (hdr->num_ref_idx_l0_active > 16) {
-    add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
-    return false;
-  }
+      add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+      return false;
+    }
 
     assert(hdr->num_ref_idx_l1_active <= 16);
     for (rIdx=0; rIdx<hdr->num_ref_idx_l1_active; rIdx++) {
@@ -2178,7 +2200,14 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
       hdr->InterLayerRefPic[1][rIdx] = isInterLayer[1][idx];
 
       // remember POC of referenced imaged (needed in motion.c, derive_collocated_motion_vector)
-      de265_image* img_1_rIdx = dpb.get_image(hdr->RefPicList[1][rIdx]);
+      de265_image* img_1_rIdx = NULL;
+      if (hdr->InterLayerRefPic[1][rIdx]) {
+        // Inter layer picture. Get the inter layer reference from ilRefPic.
+        img_1_rIdx = ilRefPic[hdr->RefPicList[1][rIdx]];
+      }
+      else {
+        img_1_rIdx = dpb.get_image(hdr->RefPicList[1][rIdx]);
+      }
       if (img_1_rIdx == NULL) { return false; }
       hdr->RefPicList_POC[1][rIdx] = img_1_rIdx->PicOrderCntVal;
       hdr->RefPicList_PicState[1][rIdx] = img_1_rIdx->PicState;
@@ -2351,7 +2380,7 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
 
   current_pps = pps[pps_id];
   current_sps = sps[ (int)current_pps->seq_parameter_set_id ];
-  current_vps = vps[ (int)current_sps->video_parameter_set_id ];
+  current_vps = get_vps((int)current_sps->video_parameter_set_id);
 
   calc_tid_and_framerate_ratio();
 
@@ -2661,14 +2690,14 @@ de265_error error_queue::get_warning()
   return warn;
 }
 
-video_parameter_set* decoder_context::get_vps(int id)
+std::shared_ptr<video_parameter_set> decoder_context::get_vps(int id)
 {
   assert( id < DE265_MAX_VPS_SETS );
   if (layer_ID != 0) {
     // Multi layer decoding.
-    // The VPS is handeled by the base layer decoder. Get it there.
+    // The VPS is handeled by the base layer decoder context. Get it there.
     decoder_context_multilayer* ml_dec = get_multi_layer_decoder();
     return ml_dec->get_layer_dec(0)->get_vps(id);
   }
-  return vps[id].get();
+  return vps[id];
 }

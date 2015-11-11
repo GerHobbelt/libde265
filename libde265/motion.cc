@@ -1673,8 +1673,8 @@ void derive_combined_bipredictive_merging_candidates(const base_context* ctx,
       logtrace(LogMotion,"l0Cand:\n"); logmvcand(l0Cand);
       logtrace(LogMotion,"l1Cand:\n"); logmvcand(l1Cand);
 
-      const de265_image* img0 = l0Cand.predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand.refIdx[0]]) : NULL;
-      const de265_image* img1 = l1Cand.predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand.refIdx[1]]) : NULL;
+      const de265_image* img0 = l0Cand.predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand.refIdx[0]], shdr->InterLayerRefPic[0][l0Cand.refIdx[0]]) : NULL;
+      const de265_image* img1 = l1Cand.predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand.refIdx[1]], shdr->InterLayerRefPic[1][l1Cand.refIdx[1]]) : NULL;
 
       if (l0Cand.predFlag[0] && !img0) {
         return; // TODO error
@@ -1967,9 +1967,9 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
       logmvcand(vi);
 
       const de265_image* imgX = NULL;
-      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
       const de265_image* imgY = NULL;
-      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
 
       // check whether the predictor X is available and references the same POC
       if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
@@ -2102,9 +2102,9 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
 
       const de265_image* imgX = NULL;
-      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][vi.refIdx[X]], shdr->InterLayerRefPic[X][vi.refIdx[X]]);
       const de265_image* imgY = NULL;
-      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][vi.refIdx[Y]], shdr->InterLayerRefPic[Y][vi.refIdx[Y]]);
 
       if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"a) take B%d/L%d as B candidate with same POC\n",k,X);

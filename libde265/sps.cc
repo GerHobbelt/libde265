@@ -219,7 +219,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     // When not present, the value of sps_max_sub_layers_minus1 is inferred to be equal to ( sps_ext_or_max_sub_layers_minus1  = =  7 ) ? vps_max_sub_layers_minus1 : sps_ext_or_max_sub_layers_minus1.
     if (sps_ext_or_max_sub_layers_minus1 == 7) {
       // Get the VPS
-      video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+      std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
 
       sps_max_sub_layers = vps->vps_max_sub_layers;
     }
@@ -243,7 +243,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   if (MultiLayerExtSpsFlag) {
     // Infer picture size / color information from the VPS extension
-    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
     video_parameter_set_extension *vps_ext = &vps->vps_extension;
     int repFormatIdx;
 
@@ -401,7 +401,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   else {
     // Standard F.7.4.3.2.1 JCTVC-R1013_v6
     // 	When sps_max_dec_pic_buffering_minus1[ i ] is not present for i in the range of 0 to sps_max_sub_layers_minus1, inclusive, due to MultiLayerExtSpsFlag being equal to 1, for a layer that refers to the SPS and has nuh_layer_id equal to currLayerId, the value of sps_max_dec_pic_buffering_minus1[ i ] is inferred to be equal to max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] of the active VPS, where layerIdx is equal to the value such that LayerSetLayerIdList[ TargetDecLayerSetIdx ][ layerIdx ] is equal to currLayerId.
-    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
     video_parameter_set_extension* vps_ext = &vps->vps_extension;
 
     int TargetOlsIdx = ctx->get_multi_layer_decoder()->get_target_ols_idx();

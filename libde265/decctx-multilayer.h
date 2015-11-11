@@ -97,7 +97,7 @@ public:
   void update_parameters();
 
   // calculate the output layer set if a vps has been parsed
-  void calculate_target_output_layer_set(video_parameter_set *vps);
+  void calculate_target_output_layer_set(std::shared_ptr<video_parameter_set> vps);
 
   int get_target_ols_idx()  { return ml_dec_params.TargetOlsIdx;  }
   int get_target_Layer_ID() { return ml_dec_params.TargetLayerId; }

@@ -401,7 +401,7 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     return DE265_OK;
   }
 
-  video_parameter_set *vps = ctx->get_vps(sps->video_parameter_set_id);
+  std::shared_ptr<video_parameter_set> vps = ctx->get_vps(sps->video_parameter_set_id);
   video_parameter_set_extension* vps_ext = &vps->vps_extension;
 
   if (!first_slice_segment_in_pic_flag) {
@@ -1004,7 +1004,7 @@ de265_error slice_segment_header::read_slice_segment_header_extension(bitreader*
       extension_length_bits -= nr_bits + 1;
     }
 
-    video_parameter_set *vps = ctx->get_vps(sps->video_parameter_set_id);
+    std::shared_ptr<video_parameter_set> vps = ctx->get_vps(sps->video_parameter_set_id);
     video_parameter_set_extension* vps_ext = &vps->vps_extension;
 
     bool CraOrBlaPicFlag = ( nal_unit_type == NAL_UNIT_BLA_W_LP || nal_unit_type == NAL_UNIT_BLA_N_LP ||

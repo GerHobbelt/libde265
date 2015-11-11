@@ -341,7 +341,7 @@ void decoder_context_multilayer::set_acceleration_functions(enum de265_accelerat
   }
 }
 
-void decoder_context_multilayer::calculate_target_output_layer_set(video_parameter_set *vps)
+void decoder_context_multilayer::calculate_target_output_layer_set(std::shared_ptr<video_parameter_set> vps)
 {
   if (vps==NULL || !vps->vps_extension_flag) {
     // No VPS extension. No multilayer.

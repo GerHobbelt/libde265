@@ -302,7 +302,8 @@ class decoder_context : public base_context {
   bool has_sps(int id) const { return (bool)sps[id]; }
   bool has_pps(int id) const { return (bool)pps[id]; }
 
-      video_parameter_set* get_vps(int id);
+  std::shared_ptr<video_parameter_set> get_vps(int id);
+
   /* */ seq_parameter_set* get_sps(int id)       { return sps[id].get(); }
   const seq_parameter_set* get_sps(int id) const { return sps[id].get(); }
   /* */ pic_parameter_set* get_pps(int id)       { return pps[id].get(); }
@@ -343,7 +344,7 @@ class decoder_context : public base_context {
   int  get_layer_id()       { return layer_ID; }
   decoder_context_multilayer* get_multi_layer_decoder() { return ml_decoder; }
   void set_multi_layer_decoder(decoder_context_multilayer* p) { ml_decoder = p; }
-  video_parameter_set *get_last_parsed_vps() {return last_vps;}
+  std::shared_ptr<video_parameter_set> get_last_parsed_vps() {return last_vps;}
   
   // The dec context only has a pointer to the multilayer_decoder_context nal parser,
   // but no nal parser itself.
@@ -399,7 +400,7 @@ class decoder_context : public base_context {
   // Multi layer extensions
   int layer_ID;
   decoder_context_multilayer *ml_decoder;
-  video_parameter_set *last_vps;    // A pointer to the most recently parsed VPS
+  std::shared_ptr<video_parameter_set>  last_vps;    // A pointer to the most recently parsed VPS
 
   std::shared_ptr<video_parameter_set>  vps[ DE265_MAX_VPS_SETS ];
   std::shared_ptr<seq_parameter_set>    sps[ DE265_MAX_SPS_SETS ];
@@ -424,6 +425,8 @@ class decoder_context : public base_context {
   int  get_current_TID() const { return current_HighestTid; }
   int  change_framerate(int more_vs_less); // 1: more, -1: less
   void set_framerate_ratio(int percent);
+
+  int current_image_poc_lsb;
 
  private:
   // input parameters
@@ -450,7 +453,7 @@ class decoder_context : public base_context {
 
   decoded_picture_buffer dpb;
 
-  int current_image_poc_lsb;
+  
   bool first_decoded_picture;
   bool NoRaslOutputFlag;
   bool HandleCraAsBlaFlag;
