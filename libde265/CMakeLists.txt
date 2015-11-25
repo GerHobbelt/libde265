@@ -2,6 +2,7 @@ set (libde265_sources
   bitstream.cc
   cabac.cc
   de265.cc
+  de265_internals.cc
   deblock.cc
   decctx.cc
   nal-parser.cc
@@ -24,6 +25,7 @@ set (libde265_sources
   vps.cc
   bitstream.h
   cabac.h
+  de265_internals.h
   deblock.h
   decctx.h
   image.h
