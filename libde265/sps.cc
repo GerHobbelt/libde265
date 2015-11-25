@@ -219,7 +219,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
     // When not present, the value of sps_max_sub_layers_minus1 is inferred to be equal to ( sps_ext_or_max_sub_layers_minus1  = =  7 ) ? vps_max_sub_layers_minus1 : sps_ext_or_max_sub_layers_minus1.
     if (sps_ext_or_max_sub_layers_minus1 == 7) {
       // Get the VPS
-      video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+      std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
 
       sps_max_sub_layers = vps->vps_max_sub_layers;
     }
@@ -243,7 +243,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   if (MultiLayerExtSpsFlag) {
     // Infer picture size / color information from the VPS extension
-    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
     video_parameter_set_extension *vps_ext = &vps->vps_extension;
     int repFormatIdx;
 
@@ -288,7 +288,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   else {
     // --- decode chroma type ---
 
-    READ_VLC(chroma_format_idc, uvlc);
+  READ_VLC(chroma_format_idc, uvlc);
 
     if (chroma_format_idc == 3) {
       separate_colour_plane_flag = get_bits(br,1);
@@ -401,7 +401,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   else {
     // Standard F.7.4.3.2.1 JCTVC-R1013_v6
     // 	When sps_max_dec_pic_buffering_minus1[ i ] is not present for i in the range of 0 to sps_max_sub_layers_minus1, inclusive, due to MultiLayerExtSpsFlag being equal to 1, for a layer that refers to the SPS and has nuh_layer_id equal to currLayerId, the value of sps_max_dec_pic_buffering_minus1[ i ] is inferred to be equal to max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] of the active VPS, where layerIdx is equal to the value such that LayerSetLayerIdList[ TargetDecLayerSetIdx ][ layerIdx ] is equal to currLayerId.
-    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    std::shared_ptr<video_parameter_set> vps = ctx->get_vps(video_parameter_set_id);
     video_parameter_set_extension* vps_ext = &vps->vps_extension;
 
     int TargetOlsIdx = ctx->get_multi_layer_decoder()->get_target_ols_idx();
@@ -559,12 +559,19 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 }
 
 
-de265_error seq_parameter_set::compute_derived_values()
+de265_error seq_parameter_set::compute_derived_values(bool sanitize_values)
 {
   // --- compute derived values ---
 
   SubWidthC  = SubWidthC_tab [chroma_format_idc];
   SubHeightC = SubHeightC_tab[chroma_format_idc];
+
+  if (separate_colour_plane_flag) {
+    ChromaArrayType = 0;
+  }
+  else {
+    ChromaArrayType = chroma_format_idc;
+  }
 
   if (ChromaArrayType==0) {
     WinUnitX = 1;
@@ -607,8 +614,35 @@ de265_error seq_parameter_set::compute_derived_values()
   Log2MinTrafoSize = log2_min_transform_block_size;
   Log2MaxTrafoSize = log2_min_transform_block_size + log2_diff_max_min_transform_block_size;
 
-  if (max_transform_hierarchy_depth_inter > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
-  if (max_transform_hierarchy_depth_intra > Log2CtbSizeY - Log2MinTrafoSize) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if (max_transform_hierarchy_depth_inter > Log2CtbSizeY - Log2MinTrafoSize) {
+    if (sanitize_values) {
+      max_transform_hierarchy_depth_inter = Log2CtbSizeY - Log2MinTrafoSize;
+    } else {
+      fprintf(stderr,"SPS error: transform hierarchy depth (inter) > CTB size - min TB size\n");
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+
+  if (max_transform_hierarchy_depth_intra > Log2CtbSizeY - Log2MinTrafoSize) {
+    if (sanitize_values) {
+      max_transform_hierarchy_depth_intra = Log2CtbSizeY - Log2MinTrafoSize;
+    } else {
+      fprintf(stderr,"SPS error: transform hierarchy depth (intra) > CTB size - min TB size\n");
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+
+
+  if (sanitize_values) {
+    if (max_transform_hierarchy_depth_inter < Log2CtbSizeY - Log2MaxTrafoSize) {
+      max_transform_hierarchy_depth_inter = Log2CtbSizeY - Log2MaxTrafoSize;
+    }
+
+    if (max_transform_hierarchy_depth_intra < Log2CtbSizeY - Log2MaxTrafoSize) {
+      max_transform_hierarchy_depth_intra = Log2CtbSizeY - Log2MaxTrafoSize;
+    }
+  }
+
 
   Log2MinPUSize = Log2MinCbSizeY-1;
   PicWidthInMinPUs  = PicWidthInCtbsY  << (Log2CtbSizeY - Log2MinPUSize);
@@ -643,23 +677,28 @@ de265_error seq_parameter_set::compute_derived_values()
   if (pic_width_in_luma_samples  % MinCbSizeY != 0 ||
       pic_height_in_luma_samples % MinCbSizeY != 0) {
     // TODO: warn that image size is coded wrong in bitstream (must be multiple of MinCbSizeY)
+    fprintf(stderr,"SPS error: CB alignment\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MinTrafoSize > Log2MinCbSizeY) {
+    fprintf(stderr,"SPS error: TB > CB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MaxTrafoSize > libde265_min(Log2CtbSizeY,5)) {
+    fprintf(stderr,"SPS error: TB_max > 32 or CTB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
 
   if (BitDepth_Y < 8 || BitDepth_Y > 16) {
+    fprintf(stderr,"SPS error: bitdepth Y not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (BitDepth_C < 8 || BitDepth_C > 16) {
+    fprintf(stderr,"SPS error: bitdepth C not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 

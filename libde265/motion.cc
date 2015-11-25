@@ -22,6 +22,8 @@
 #include "decctx.h"
 #include "util.h"
 #include "dpb.h"
+#include "encoder/encoder-context.h"
+
 #include <assert.h>
 
 
@@ -466,7 +468,7 @@ void generate_inter_prediction_samples(base_context* ctx,
                                        int xC,int yC,
                                        int xB,int yB,
                                        int nCS, int nPbW,int nPbH,
-                                       const MotionVectorSpec* vi)
+                                       const PBMotion* vi)
 {
   int xP = xC+xB;
   int yP = yC+yB;
@@ -474,8 +476,11 @@ void generate_inter_prediction_samples(base_context* ctx,
   void*  pixels[3];
   int    stride[3];
 
-  const int SubWidthC  = img->sps.SubWidthC;
-  const int SubHeightC = img->sps.SubHeightC;
+  const pic_parameter_set* pps = shdr->pps;
+  const seq_parameter_set* sps = pps->sps;
+
+  const int SubWidthC  = sps->SubWidthC;
+  const int SubHeightC = sps->SubHeightC;
 
   pixels[0] = img->get_image_plane_at_pos_any_depth(0,xP,yP);
   stride[0] = img->get_image_stride(0);
@@ -497,14 +502,14 @@ void generate_inter_prediction_samples(base_context* ctx,
   predFlag[0] = vi->predFlag[0];
   predFlag[1] = vi->predFlag[1];
 
-  const int bit_depth_L = img->sps.BitDepth_Y;
-  const int bit_depth_C = img->sps.BitDepth_C;
+  const int bit_depth_L = sps->BitDepth_Y;
+  const int bit_depth_C = sps->BitDepth_C;
 
   // Some encoders use bi-prediction with two similar MVs.
   // Identify this case and use only one MV.
 
   // do this only without weighted prediction, because the weights/offsets may be different
-  if (img->pps.weighted_pred_flag==0) {
+  if (pps->weighted_pred_flag==0) {
     if (predFlag[0] && predFlag[1]) {
       if (vi->mv[0].x == vi->mv[1].x &&
           vi->mv[0].y == vi->mv[1].y &&
@@ -619,31 +624,31 @@ void generate_inter_prediction_samples(base_context* ctx,
           // TODO: must predSamples stride really be nCS or can it be somthing smaller like nPbW?
 
           if (img->high_bit_depth(0)) {
-            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_luma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                     predSamplesL[l],nCS,
                     (const uint16_t*)refPic->get_image_plane(0),
                     refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
           }
           else {
-            mc_luma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_luma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                     predSamplesL[l],nCS,
                     (const uint8_t*)refPic->get_image_plane(0),
                     refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
           }
 
           if (img->high_bit_depth(0)) {
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                       predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
                       refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                       predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
                       refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
           }
           else {
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                       predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
                       refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-            mc_chroma(ctx, &img->sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
                       predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
                       refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
           }
@@ -655,10 +660,10 @@ void generate_inter_prediction_samples(base_context* ctx,
 
   // weighted sample prediction  (8.5.3.2.3)
 
-  const int shift1_L = libde265_max(2,14-img->sps.BitDepth_Y);
-  const int offset_shift1_L = img->sps.WpOffsetBdShiftY;
-  const int shift1_C = libde265_max(2,14-img->sps.BitDepth_C);
-  const int offset_shift1_C = img->sps.WpOffsetBdShiftC;
+  const int shift1_L = libde265_max(2,14-sps->BitDepth_Y);
+  const int offset_shift1_L = img->get_sps().WpOffsetBdShiftY;
+  const int shift1_C = libde265_max(2,14-sps->BitDepth_C);
+  const int offset_shift1_C = img->get_sps().WpOffsetBdShiftC;
 
   /*
   const int shift1_L = 14-img->sps.BitDepth_Y;
@@ -693,7 +698,7 @@ void generate_inter_prediction_samples(base_context* ctx,
   logtrace(LogMotion,"predFlags (modified): %d %d\n", predFlag[0], predFlag[1]);
 
   if (shdr->slice_type == SLICE_TYPE_P) {
-    if (img->pps.weighted_pred_flag==0) {
+    if (pps->weighted_pred_flag==0) {
       if (predFlag[0]==1 && predFlag[1]==0) {
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[0],nCS, nPbW,nPbH, bit_depth_L);
@@ -749,7 +754,7 @@ void generate_inter_prediction_samples(base_context* ctx,
     assert(shdr->slice_type == SLICE_TYPE_B);
 
     if (predFlag[0]==1 && predFlag[1]==1) {
-      if (img->pps.weighted_bipred_flag==0) {
+      if (pps->weighted_bipred_flag==0) {
         //const int shift2  = 15-8; // TODO: real bit depth
         //const int offset2 = 1<<(shift2-1);
 
@@ -826,7 +831,7 @@ void generate_inter_prediction_samples(base_context* ctx,
     else if (predFlag[0]==1 || predFlag[1]==1) {
       int l = predFlag[0] ? 0 : 1;
 
-      if (img->pps.weighted_bipred_flag==0) {
+      if (pps->weighted_bipred_flag==0) {
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[l],nCS, nPbW,nPbH, bit_depth_L);
         ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
@@ -917,7 +922,7 @@ void generate_inter_prediction_samples(base_context* ctx,
 
 
 #ifdef DE265_LOG_TRACE
-void logmvcand(const MotionVectorSpec p)
+void logmvcand(const PBMotion& p)
 {
   for (int v=0;v<2;v++) {
     if (p.predFlag[v]) {
@@ -933,22 +938,61 @@ void logmvcand(const MotionVectorSpec p)
 #endif
 
 
-LIBDE265_INLINE static bool equal_cand_MV(const MotionVectorSpec* a, const MotionVectorSpec* b)
+bool PBMotion::operator==(const PBMotion& b) const
 {
+  const PBMotion& a = *this;
+
   // TODO: is this really correct? no check for predFlag? Standard says so... (p.127)
 
   for (int i=0;i<2;i++) {
-    if (a->predFlag[i] != b->predFlag[i]) return false;
+    if (a.predFlag[i] != b.predFlag[i]) return false;
 
-    if (a->predFlag[i]) {
-      if (a->mv[i].x != b->mv[i].x) return false;
-      if (a->mv[i].y != b->mv[i].y) return false;
-      if (a->refIdx[i] != b->refIdx[i]) return false;
+    if (a.predFlag[i]) {
+      if (a.mv[i].x != b.mv[i].x) return false;
+      if (a.mv[i].y != b.mv[i].y) return false;
+      if (a.refIdx[i] != b.refIdx[i]) return false;
     }
   }
 
   return true;
 }
+
+
+// TODO: add specializations for de265_image and encoder_context
+template <class T> class MotionVectorAccess
+{
+public:
+  enum PartMode get_PartMode(int x,int y);
+  const PBMotion& get_mv_info(int x,int y);
+};
+
+
+template <> class MotionVectorAccess<de265_image>
+{
+public:
+  MotionVectorAccess(const de265_image* i) : img(i) { }
+
+  enum PartMode get_PartMode(int x,int y) { return img->get_PartMode(x,y); }
+  const PBMotion& get_mv_info(int x,int y) { return img->get_mv_info(x,y); }
+
+private:
+  const de265_image* img;
+};
+
+
+template <> class MotionVectorAccess<encoder_context>
+{
+public:
+  MotionVectorAccess(const encoder_context* e) : ectx(e) { }
+
+  enum PartMode get_PartMode(int x,int y) { return ectx->ctbs.getCB(x,y)->PartMode; }
+  const PBMotion& get_mv_info(int x,int y) {
+    return ectx->ctbs.getPB(x,y)->motion;
+  }
+
+private:
+  const encoder_context* ectx;
+};
 
 
 /*
@@ -994,18 +1038,21 @@ LIBDE265_INLINE static bool equal_cand_MV(const MotionVectorSpec* a, const Motio
   second part to the parameters of the first part, since then, we could use 2Nx2N
   right away. -> Exclude this candidate.
 */
-int derive_spatial_merging_candidates(const de265_image* img,
+template <class MVAccessType>
+int derive_spatial_merging_candidates(//const de265_image* img,
+                                      MotionVectorAccess<MVAccessType> mvaccess,
+                                      const de265_image* img,
                                       int xC, int yC, int nCS, int xP, int yP,
                                       uint8_t singleMCLFlag,
                                       int nPbW, int nPbH,
                                       int partIdx,
-                                      MotionVectorSpec* out_cand,
+                                      PBMotion* out_cand,
                                       int maxCandidates)
 {
-  const pic_parameter_set* pps = &img->pps;
+  const pic_parameter_set* pps = &img->get_pps();
   const int log2_parallel_merge_level = pps->log2_parallel_merge_level;
 
-  enum PartMode PartMode = img->get_PartMode(xC,yC);
+  enum PartMode PartMode = mvaccess.get_PartMode(xC,yC);
 
   /*
   const int A0 = SpatialMergingCandidates::PRED_A0;
@@ -1049,7 +1096,7 @@ int derive_spatial_merging_candidates(const de265_image* img,
 
   if (availableA1) {
     idxA1 = computed_candidates++;
-    out_cand[idxA1] = img->get_mv_info(xA1,yA1);
+    out_cand[idxA1] = mvaccess.get_mv_info(xA1,yA1);
 
     logtrace(LogMotion,"spatial merging candidate A1:\n");
     logmvcand(out_cand[idxA1]);
@@ -1088,11 +1135,10 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB1) {
-    const MotionVectorSpec b1 = img->get_mv_info(xB1,yB1);
+    const PBMotion& b1 = img->get_mv_info(xB1,yB1);
 
     // B1 == A1 -> discard B1
-    if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], &b1)) {
+    if (availableA1 && out_cand[idxA1] == b1) {
       idxB1 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B1: redundant to A1\n");
     }
@@ -1127,11 +1173,10 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB0) {
-    const MotionVectorSpec b0 = img->get_mv_info(xB0,yB0);
+    const PBMotion& b0 = img->get_mv_info(xB0,yB0);
 
     // B0 == B1 -> discard B0
-    if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], &b0)) {
+    if (availableB1 && out_cand[idxB1]==b0) {
       idxB0 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B0: redundant to B1\n");
     }
@@ -1165,11 +1210,10 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableA0) {
-    const MotionVectorSpec a0 = img->get_mv_info(xA0,yA0);
+    const PBMotion& a0 = img->get_mv_info(xA0,yA0);
 
     // A0 == A1 -> discard A0
-    if (availableA1 &&
-        equal_cand_MV(&out_cand[idxA1], &a0)) {
+    if (availableA1 && out_cand[idxA1]==a0) {
       idxA0 = idxA1;
       logtrace(LogMotion,"spatial merging candidate A0: redundant to A1\n");
     }
@@ -1208,17 +1252,15 @@ int derive_spatial_merging_candidates(const de265_image* img,
   }
 
   if (availableB2) {
-    const MotionVectorSpec b2 = img->get_mv_info(xB2,yB2);
+    const PBMotion& b2 = img->get_mv_info(xB2,yB2);
 
     // B2 == B1 -> discard B2
-    if (availableB1 &&
-        equal_cand_MV(&out_cand[idxB1], &b2)) {
+    if (availableB1 && out_cand[idxB1]==b2) {
       idxB2 = idxB1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to B1\n");
     }
     // B2 == A1 -> discard B2
-    else if (availableA1 &&
-             equal_cand_MV(&out_cand[idxA1], &b2)) {
+    else if (availableA1 && out_cand[idxA1]==b2) {
       idxB2 = idxA1;
       logtrace(LogMotion,"spatial merging candidate B2: redundant to A1\n");
     }
@@ -1236,7 +1278,7 @@ int derive_spatial_merging_candidates(const de265_image* img,
 
 // 8.5.3.1.4
 void derive_zero_motion_vector_candidates(const slice_segment_header* shdr,
-                                          MotionVectorSpec* out_mergeCandList,
+                                          PBMotion* out_mergeCandList,
                                           int* inout_numCurrMergeCand,
                                           int maxCandidates)
 {
@@ -1261,7 +1303,7 @@ void derive_zero_motion_vector_candidates(const slice_segment_header* shdr,
 
     logtrace(LogMotion,"zeroIdx:%d numRefIdx:%d\n", zeroIdx, numRefIdx);
 
-    MotionVectorSpec* newCand = &out_mergeCandList[*inout_numCurrMergeCand];
+    PBMotion* newCand = &out_mergeCandList[*inout_numCurrMergeCand];
 
     const int refIdx = (zeroIdx < numRefIdx) ? zeroIdx : 0;
 
@@ -1375,7 +1417,7 @@ void derive_collocated_motion_vectors(base_context* ctx,
 
   // get the collocated MV
 
-  const MotionVectorSpec mvi = colImg->get_mv_info(xColPb,yColPb);
+  const PBMotion& mvi = colImg->get_mv_info(xColPb,yColPb);
   int listCol;
   int refIdxCol;
   MotionVector mvCol;
@@ -1515,7 +1557,7 @@ void derive_temporal_luma_vector_prediction(base_context* ctx,
 
   // --- find collocated reference image ---
 
-  int Log2CtbSizeY = img->sps.Log2CtbSizeY;
+  int Log2CtbSizeY = img->get_sps().Log2CtbSizeY;
 
   int colPic; // TODO: this is the same for the whole slice. We can precompute it.
   bool colPic_il; // Is this an inter layer picture?
@@ -1562,8 +1604,8 @@ void derive_temporal_luma_vector_prediction(base_context* ctx,
      This is to reduce the memory bandwidth requirements.
    */
   if ((yP>>Log2CtbSizeY) == (yColBr>>Log2CtbSizeY) &&
-      xColBr < img->sps.pic_width_in_luma_samples &&
-      yColBr < img->sps.pic_height_in_luma_samples)
+      xColBr < img->get_sps().pic_width_in_luma_samples &&
+      yColBr < img->get_sps().pic_height_in_luma_samples)
     {
       xColPb = xColBr & ~0x0F; // reduce resolution of collocated motion-vectors to 16 pixels grid
       yColPb = yColBr & ~0x0F;
@@ -1604,7 +1646,7 @@ static int table_8_19[2][12] = {
 + */
 void derive_combined_bipredictive_merging_candidates(const base_context* ctx,
                                                      const slice_segment_header* shdr,
-                                                     MotionVectorSpec* inout_mergeCandList,
+                                                     PBMotion* inout_mergeCandList,
                                                      int* inout_numMergeCand,
                                                      int maxCandidates)
 {
@@ -1624,39 +1666,39 @@ void derive_combined_bipredictive_merging_candidates(const base_context* ctx,
         assert(false); // bitstream error -> TODO: conceal error
       }
 
-      MotionVectorSpec* l0Cand = &inout_mergeCandList[l0CandIdx];
-      MotionVectorSpec* l1Cand = &inout_mergeCandList[l1CandIdx];
+      PBMotion& l0Cand = inout_mergeCandList[l0CandIdx];
+      PBMotion& l1Cand = inout_mergeCandList[l1CandIdx];
 
       logtrace(LogMotion,"add bipredictive merging candidate (combIdx:%d)\n",combIdx);
-      logtrace(LogMotion,"l0Cand:\n"); logmvcand(*l0Cand);
-      logtrace(LogMotion,"l1Cand:\n"); logmvcand(*l1Cand);
+      logtrace(LogMotion,"l0Cand:\n"); logmvcand(l0Cand);
+      logtrace(LogMotion,"l1Cand:\n"); logmvcand(l1Cand);
 
-      const de265_image* img0 = l0Cand->predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand->refIdx[0]], shdr->InterLayerRefPic[0][l0Cand->refIdx[0]]) : NULL;
-      const de265_image* img1 = l1Cand->predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand->refIdx[1]], shdr->InterLayerRefPic[1][l1Cand->refIdx[1]]) : NULL;
+      const de265_image* img0 = l0Cand.predFlag[0] ? ctx->get_image(shdr->RefPicList[0][l0Cand.refIdx[0]], shdr->InterLayerRefPic[0][l0Cand.refIdx[0]]) : NULL;
+      const de265_image* img1 = l1Cand.predFlag[1] ? ctx->get_image(shdr->RefPicList[1][l1Cand.refIdx[1]], shdr->InterLayerRefPic[1][l1Cand.refIdx[1]]) : NULL;
 
-      if (l0Cand->predFlag[0] && !img0) {
+      if (l0Cand.predFlag[0] && !img0) {
         return; // TODO error
       }
 
-      if (l1Cand->predFlag[1] && !img1) {
+      if (l1Cand.predFlag[1] && !img1) {
         return; // TODO error
       }
 
-      if (l0Cand->predFlag[0] && l1Cand->predFlag[1] &&
+      if (l0Cand.predFlag[0] && l1Cand.predFlag[1] &&
           (img0->PicOrderCntVal != img1->PicOrderCntVal     ||
-           l0Cand->mv[0].x != l1Cand->mv[1].x ||
-           l0Cand->mv[0].y != l1Cand->mv[1].y)) {
-        MotionVectorSpec* p = &inout_mergeCandList[ *inout_numMergeCand ];
-        p->refIdx[0] = l0Cand->refIdx[0];
-        p->refIdx[1] = l1Cand->refIdx[1];
-        p->predFlag[0] = l0Cand->predFlag[0];
-        p->predFlag[1] = l1Cand->predFlag[1];
-        p->mv[0] = l0Cand->mv[0];
-        p->mv[1] = l1Cand->mv[1];
+           l0Cand.mv[0].x != l1Cand.mv[1].x ||
+           l0Cand.mv[0].y != l1Cand.mv[1].y)) {
+        PBMotion& p = inout_mergeCandList[ *inout_numMergeCand ];
+        p.refIdx[0] = l0Cand.refIdx[0];
+        p.refIdx[1] = l1Cand.refIdx[1];
+        p.predFlag[0] = l0Cand.predFlag[0];
+        p.predFlag[1] = l1Cand.predFlag[1];
+        p.mv[0] = l0Cand.mv[0];
+        p.mv[1] = l1Cand.mv[1];
         (*inout_numMergeCand)++;
 
         logtrace(LogMotion,"result:\n");
-        logmvcand(*p);
+        logmvcand(p);
       }
 
       combIdx++;
@@ -1670,13 +1712,16 @@ void derive_combined_bipredictive_merging_candidates(const base_context* ctx,
 
 
 // 8.5.3.1.1
-static void get_merge_candidate_list_without_step_9(base_context* ctx,
-                                                    const slice_segment_header* shdr,
-                                                    de265_image* img,
-                                                    int xC,int yC, int xP,int yP,
-                                                    int nCS, int nPbW,int nPbH, int partIdx,
-                                                    int max_merge_idx,
-                                                    MotionVectorSpec* mergeCandList)
+
+template <class MVAccess>
+void get_merge_candidate_list_without_step_9(base_context* ctx,
+                                             const slice_segment_header* shdr,
+                                             MotionVectorAccess<MVAccess> mvaccess,
+                                             de265_image* img,
+                                             int xC,int yC, int xP,int yP,
+                                             int nCS, int nPbW,int nPbH, int partIdx,
+                                             int max_merge_idx,
+                                             PBMotion* mergeCandList)
 {
 
   //int xOrigP = xP;
@@ -1691,9 +1736,9 @@ static void get_merge_candidate_list_without_step_9(base_context* ctx,
      Having additional candidates might have these advantages:
      - coding MVs for these small PBs is expensive, and
      - since the PBs are not far away from a proper (neighboring) merging candidate,
-       the quality of the candidates will still be good.
-   */
-  singleMCLFlag = (img->pps.log2_parallel_merge_level > 2 && nCS==8);
+     the quality of the candidates will still be good.
+  */
+  singleMCLFlag = (img->get_pps().log2_parallel_merge_level > 2 && nCS==8);
 
   if (singleMCLFlag) {
     xP=xC;
@@ -1709,7 +1754,8 @@ static void get_merge_candidate_list_without_step_9(base_context* ctx,
 
   // --- spatial merge candidates
 
-  numMergeCand = derive_spatial_merging_candidates(img, xC,yC, nCS, xP,yP, singleMCLFlag,
+  numMergeCand = derive_spatial_merging_candidates(mvaccess,
+                                                   img, xC,yC, nCS, xP,yP, singleMCLFlag,
                                                    nPbW,nPbH,partIdx, mergeCandList,
                                                    maxCandidates);
 
@@ -1735,7 +1781,7 @@ static void get_merge_candidate_list_without_step_9(base_context* ctx,
 
 
     if (availableFlagCol) {
-      MotionVectorSpec* colVec = &mergeCandList[numMergeCand++];
+      PBMotion* colVec = &mergeCandList[numMergeCand++];
 
       colVec->mv[0] = mvCol[0];
       colVec->mv[1] = mvCol[1];
@@ -1775,11 +1821,39 @@ void get_merge_candidate_list(base_context* ctx,
                               de265_image* img,
                               int xC,int yC, int xP,int yP,
                               int nCS, int nPbW,int nPbH, int partIdx,
-                              MotionVectorSpec* mergeCandList)
+                              PBMotion* mergeCandList)
 {
   int max_merge_idx = 5-shdr->five_minus_max_num_merge_cand -1;
 
-  get_merge_candidate_list_without_step_9(ctx, shdr, img,
+  get_merge_candidate_list_without_step_9(ctx, shdr,
+                                          MotionVectorAccess<de265_image>(img), img,
+                                          xC,yC,xP,yP,nCS,nPbW,nPbH, partIdx,
+                                          max_merge_idx, mergeCandList);
+
+  // 9. for encoder: modify all merge candidates
+
+  for (int i=0;i<=max_merge_idx;i++) {
+    if (mergeCandList[i].predFlag[0] &&
+        mergeCandList[i].predFlag[1] &&
+        nPbW+nPbH==12)
+      {
+        mergeCandList[i].refIdx[1]   = -1;
+        mergeCandList[i].predFlag[1] = 0;
+      }
+  }
+}
+
+
+void get_merge_candidate_list_from_tree(encoder_context* ectx,
+                                        const slice_segment_header* shdr,
+                                        int xC,int yC, int xP,int yP,
+                                        int nCS, int nPbW,int nPbH, int partIdx,
+                                        PBMotion* mergeCandList)
+{
+  int max_merge_idx = 5-shdr->five_minus_max_num_merge_cand -1;
+
+  get_merge_candidate_list_without_step_9(ectx, shdr,
+                                          MotionVectorAccess<encoder_context>(ectx), ectx->img,
                                           xC,yC,xP,yP,nCS,nPbW,nPbH, partIdx,
                                           max_merge_idx, mergeCandList);
 
@@ -1804,11 +1878,12 @@ void derive_luma_motion_merge_mode(base_context* ctx,
                                    int xC,int yC, int xP,int yP,
                                    int nCS, int nPbW,int nPbH, int partIdx,
                                    int merge_idx,
-                                   MotionVectorSpec* out_vi)
+                                   PBMotion* out_vi)
 {
-  MotionVectorSpec mergeCandList[5];
+  PBMotion mergeCandList[5];
 
-  get_merge_candidate_list_without_step_9(ctx, shdr, img,
+  get_merge_candidate_list_without_step_9(ctx, shdr,
+                                          MotionVectorAccess<de265_image>(img), img,
                                           xC,yC,xP,yP,nCS,nPbW,nPbH, partIdx,
                                           merge_idx, mergeCandList);
 
@@ -1887,7 +1962,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
+      const PBMotion& vi = img->get_mv_info(xA[k],yA[k]);
       logtrace(LogMotion,"MVP A%d=\n",k);
       logmvcand(vi);
 
@@ -1929,7 +2004,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec vi = img->get_mv_info(xA[k],yA[k]);
+      const PBMotion& vi = img->get_mv_info(xA[k],yA[k]);
       if (vi.predFlag[X]==1 &&
           shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
 
@@ -2021,7 +2096,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
 
       int Y=1-X;
 
-      const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
+      const PBMotion& vi = img->get_mv_info(xB[k],yB[k]);
       logtrace(LogMotion,"MVP B%d=\n",k);
       logmvcand(vi);
 
@@ -2076,7 +2151,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
       if (availableB[k]) {
         int Y=1-X;
 
-        const MotionVectorSpec vi = img->get_mv_info(xB[k],yB[k]);
+        const PBMotion& vi = img->get_mv_info(xB[k],yB[k]);
 
         if (vi.predFlag[X]==1 &&
             shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
@@ -2211,7 +2286,7 @@ void fill_luma_motion_vector_predictors(base_context* ctx,
 MotionVector luma_motion_vector_prediction(base_context* ctx,
                                            const slice_segment_header* shdr,
                                            de265_image* img,
-                                           const motion_spec& motion,
+                                           const PBMotionCoding& motion,
                                            int xC,int yC,int nCS,int xP,int yP,
                                            int nPbW,int nPbH, int l,
                                            int refIdx, int partIdx)
@@ -2230,7 +2305,7 @@ MotionVector luma_motion_vector_prediction(base_context* ctx,
 
 
 #if DE265_LOG_TRACE
-void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const MotionVectorSpec* mv)
+void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const PBMotion* mv)
 {
   int pred0 = mv->predFlag[0];
   int pred1 = mv->predFlag[1];
@@ -2252,10 +2327,10 @@ void logMV(int x0,int y0,int nPbW,int nPbH, const char* mode,const MotionVectorS
 void motion_vectors_and_ref_indices(base_context* ctx,
                                     const slice_segment_header* shdr,
                                     de265_image* img,
-                                    const motion_spec& motion,
+                                    const PBMotionCoding& motion,
                                     int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH,
                                     int partIdx,
-                                    MotionVectorSpec* out_vi)
+                                    PBMotion* out_vi)
 {
   //slice_segment_header* shdr = tctx->shdr;
 
@@ -2322,10 +2397,16 @@ void motion_vectors_and_ref_indices(base_context* ctx,
 
 
 // 8.5.3
+
+/* xC/yC : CB position
+   xB/yB : position offset of the PB
+   nPbW/nPbH : size of PB
+   nCS   : CB size
+ */
 void decode_prediction_unit(base_context* ctx,
                             const slice_segment_header* shdr,
                             de265_image* img,
-                            const motion_spec& motion,
+                            const PBMotionCoding& motion,
                             int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH, int partIdx)
 {
   logtrace(LogMotion,"decode_prediction_unit POC=%d %d;%d %dx%d\n",
@@ -2335,7 +2416,7 @@ void decode_prediction_unit(base_context* ctx,
 
   // 1.
 
-  MotionVectorSpec vi;
+  PBMotion vi;
   motion_vectors_and_ref_indices(ctx, shdr, img, motion,
                                  xC,yC, xB,yB, nCS, nPbW,nPbH, partIdx, &vi);
 
