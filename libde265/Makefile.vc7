@@ -38,10 +38,12 @@ OBJS=\
 	de265.obj \
 	deblock.obj \
 	decctx.obj \
+	decctx-multilayer.obj \
 	dpb.obj \
 	en265.obj \
 	fallback-dct.obj \
 	fallback-motion.obj \
+	fallback-upsampling.obj \
 	fallback.obj \
 	image.obj \
 	image-io.obj \
@@ -63,7 +65,8 @@ OBJS=\
 	util.obj \
 	visualize.obj \
 	vps.obj \
-        vui.obj \
+	vps-extension.obj \
+	vui.obj \
 	encoder\encoder-core.obj \
 	encoder\encoder-types.obj \
 	encoder\encoder-context.obj \
@@ -88,6 +91,7 @@ OBJS=\
 	x86\sse.obj \
 	x86\sse-dct.obj \
 	x86\sse-motion.obj \
+	x86\sse-upsampling.obj \
 	..\extra\win32cond.obj
 
 all: libde265.dll
