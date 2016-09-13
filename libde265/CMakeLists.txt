@@ -5,6 +5,7 @@ set (libde265_sources
   de265_internals.cc
   deblock.cc
   decctx.cc
+  decctx-multilayer.cc decctx-multilayer.h
   nal-parser.cc
   nal-parser.h
   dpb.cc
@@ -43,12 +44,14 @@ set (libde265_sources
   util.h
   vps.h
   vui.h vui.cc
+  vps-extension.cc vps-extension.h
   motion.cc motion.h
   threads.cc threads.h
   visualize.cc visualize.h
   acceleration.h
   fallback.cc fallback.h fallback-motion.cc fallback-motion.h
   fallback-dct.h fallback-dct.cc
+  fallback-upsampling.cc fallback-upsampling.h
   quality.cc quality.h
   configparam.cc configparam.h
   image-io.h image-io.cc

@@ -82,6 +82,10 @@ vsum = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 4));
 
 */
 
+#if HAVE_MALLOC_H
+#include <malloc.h>
+#endif
+
 #ifdef HAVE_SSE4_1
 #define MEMORY_PADDING  8
 #else
