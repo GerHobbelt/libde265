@@ -1,0 +1,263 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{BE284555-EC41-4640-87ED-FD654DF02D81}</ProjectGuid>
+    <RootNamespace>libde265</RootNamespace>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level1</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <AdditionalIncludeDirectories>C:\D\Temp\libde265_internals;C:\D\Temp\libde265_internals\libde265;C:\D\Temp\libde265_internals\extra;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WIN32_WINNT=0x0400;LIBDE265_EXPORTS;_CRT_SECURE_NO_WARNINGS;HAVE_SSE4_1;NOMINMAX;HAVE_STDINT_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level1</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <AdditionalIncludeDirectories>C:\D\Temp\libde265_internals;C:\D\Temp\libde265_internals\libde265;C:\D\Temp\libde265_internals\extra;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WIN32_WINNT=0x0400;LIBDE265_EXPORTS;_CRT_SECURE_NO_WARNINGS;HAVE_SSE4_1;NOMINMAX;HAVE_STDINT_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WIN32_WINNT=0x0400;LIBDE265_EXPORTS;_CRT_SECURE_NO_WARNINGS;HAVE_SSE4_1;NOMINMAX;HAVE_STDINT_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\D\Temp\libde265_internals;C:\D\Temp\libde265_internals\libde265;C:\D\Temp\libde265_internals\extra;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\extra\libde265\de265-version.h" />
+    <ClInclude Include="..\..\extra\win32cond.h" />
+    <ClInclude Include="..\..\libde265\acceleration.h" />
+    <ClInclude Include="..\..\libde265\alloc_pool.h" />
+    <ClInclude Include="..\..\libde265\bitstream.h" />
+    <ClInclude Include="..\..\libde265\cabac.h" />
+    <ClInclude Include="..\..\libde265\configparam.h" />
+    <ClInclude Include="..\..\libde265\contextmodel.h" />
+    <ClInclude Include="..\..\libde265\de265.h" />
+    <ClInclude Include="..\..\libde265\de265_internals.h" />
+    <ClInclude Include="..\..\libde265\deblock.h" />
+    <ClInclude Include="..\..\libde265\decctx-multilayer.h" />
+    <ClInclude Include="..\..\libde265\decctx.h" />
+    <ClInclude Include="..\..\libde265\dpb.h" />
+    <ClInclude Include="..\..\libde265\en265.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\algo.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-interpartmode.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-intra-inter.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-intrapartmode.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-mergeindex.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-skip.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\cb-split.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\coding-options.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\ctb-qscale.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\pb-mv.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\tb-intrapredmode.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\tb-rateestim.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\tb-split.h" />
+    <ClInclude Include="..\..\libde265\encoder\algo\tb-transform.h" />
+    <ClInclude Include="..\..\libde265\encoder\encoder-context.h" />
+    <ClInclude Include="..\..\libde265\encoder\encoder-core.h" />
+    <ClInclude Include="..\..\libde265\encoder\encoder-params.h" />
+    <ClInclude Include="..\..\libde265\encoder\encoder-syntax.h" />
+    <ClInclude Include="..\..\libde265\encoder\encoder-types.h" />
+    <ClInclude Include="..\..\libde265\encoder\encpicbuf.h" />
+    <ClInclude Include="..\..\libde265\encoder\sop.h" />
+    <ClInclude Include="..\..\libde265\fallback-dct.h" />
+    <ClInclude Include="..\..\libde265\fallback-motion.h" />
+    <ClInclude Include="..\..\libde265\fallback-upsampling.h" />
+    <ClInclude Include="..\..\libde265\fallback.h" />
+    <ClInclude Include="..\..\libde265\image-io.h" />
+    <ClInclude Include="..\..\libde265\image.h" />
+    <ClInclude Include="..\..\libde265\intrapred.h" />
+    <ClInclude Include="..\..\libde265\md5.h" />
+    <ClInclude Include="..\..\libde265\motion.h" />
+    <ClInclude Include="..\..\libde265\nal-parser.h" />
+    <ClInclude Include="..\..\libde265\nal.h" />
+    <ClInclude Include="..\..\libde265\pps.h" />
+    <ClInclude Include="..\..\libde265\quality.h" />
+    <ClInclude Include="..\..\libde265\refpic.h" />
+    <ClInclude Include="..\..\libde265\sao.h" />
+    <ClInclude Include="..\..\libde265\scan.h" />
+    <ClInclude Include="..\..\libde265\sei.h" />
+    <ClInclude Include="..\..\libde265\slice.h" />
+    <ClInclude Include="..\..\libde265\sps.h" />
+    <ClInclude Include="..\..\libde265\threads.h" />
+    <ClInclude Include="..\..\libde265\transform.h" />
+    <ClInclude Include="..\..\libde265\util.h" />
+    <ClInclude Include="..\..\libde265\visualize.h" />
+    <ClInclude Include="..\..\libde265\vps-extension.h" />
+    <ClInclude Include="..\..\libde265\vps.h" />
+    <ClInclude Include="..\..\libde265\vui.h" />
+    <ClInclude Include="..\..\libde265\x86\sse-dct.h" />
+    <ClInclude Include="..\..\libde265\x86\sse-motion.h" />
+    <ClInclude Include="..\..\libde265\x86\sse-upsampling.h" />
+    <ClInclude Include="..\..\libde265\x86\sse.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\extra\win32cond.c" />
+    <ClCompile Include="..\..\libde265\alloc_pool.cc" />
+    <ClCompile Include="..\..\libde265\bitstream.cc" />
+    <ClCompile Include="..\..\libde265\cabac.cc" />
+    <ClCompile Include="..\..\libde265\configparam.cc" />
+    <ClCompile Include="..\..\libde265\contextmodel.cc" />
+    <ClCompile Include="..\..\libde265\de265.cc" />
+    <ClCompile Include="..\..\libde265\de265_internals.cc" />
+    <ClCompile Include="..\..\libde265\deblock.cc" />
+    <ClCompile Include="..\..\libde265\decctx-multilayer.cc" />
+    <ClCompile Include="..\..\libde265\decctx.cc" />
+    <ClCompile Include="..\..\libde265\dpb.cc" />
+    <ClCompile Include="..\..\libde265\en265.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\algo.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-interpartmode.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-intra-inter.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-intrapartmode.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-mergeindex.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-skip.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\cb-split.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\coding-options.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\ctb-qscale.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\pb-mv.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\tb-intrapredmode.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\tb-rateestim.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\tb-split.cc" />
+    <ClCompile Include="..\..\libde265\encoder\algo\tb-transform.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encoder-context.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encoder-core.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encoder-params.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encoder-syntax.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encoder-types.cc" />
+    <ClCompile Include="..\..\libde265\encoder\encpicbuf.cc" />
+    <ClCompile Include="..\..\libde265\encoder\sop.cc" />
+    <ClCompile Include="..\..\libde265\fallback-dct.cc" />
+    <ClCompile Include="..\..\libde265\fallback-motion.cc" />
+    <ClCompile Include="..\..\libde265\fallback-upsampling.cc" />
+    <ClCompile Include="..\..\libde265\fallback.cc" />
+    <ClCompile Include="..\..\libde265\image-io.cc" />
+    <ClCompile Include="..\..\libde265\image.cc" />
+    <ClCompile Include="..\..\libde265\intrapred.cc" />
+    <ClCompile Include="..\..\libde265\md5.cc" />
+    <ClCompile Include="..\..\libde265\motion.cc" />
+    <ClCompile Include="..\..\libde265\nal-parser.cc" />
+    <ClCompile Include="..\..\libde265\nal.cc" />
+    <ClCompile Include="..\..\libde265\pps.cc" />
+    <ClCompile Include="..\..\libde265\quality.cc" />
+    <ClCompile Include="..\..\libde265\refpic.cc" />
+    <ClCompile Include="..\..\libde265\sao.cc" />
+    <ClCompile Include="..\..\libde265\scan.cc" />
+    <ClCompile Include="..\..\libde265\sei.cc" />
+    <ClCompile Include="..\..\libde265\slice.cc" />
+    <ClCompile Include="..\..\libde265\sps.cc" />
+    <ClCompile Include="..\..\libde265\threads.cc" />
+    <ClCompile Include="..\..\libde265\transform.cc" />
+    <ClCompile Include="..\..\libde265\util.cc" />
+    <ClCompile Include="..\..\libde265\visualize.cc" />
+    <ClCompile Include="..\..\libde265\vps-extension.cc" />
+    <ClCompile Include="..\..\libde265\vps.cc" />
+    <ClCompile Include="..\..\libde265\vui.cc" />
+    <ClCompile Include="..\..\libde265\x86\sse-dct.cc" />
+    <ClCompile Include="..\..\libde265\x86\sse-motion.cc" />
+    <ClCompile Include="..\..\libde265\x86\sse-upsampling.cc" />
+    <ClCompile Include="..\..\libde265\x86\sse.cc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
