@@ -17,7 +17,6 @@ configure
 de265-config.h
 
 # MSVC
-*.sln
 *.ncb
 *.suo
 *.vcproj*

@@ -260,7 +260,20 @@ struct de265_image {
   /* */ uint8_t* get_image_plane(int cIdx)       { return pixels[cIdx]; }
   const uint8_t* get_image_plane(int cIdx) const { return pixels[cIdx]; }
 
+  // Get the image plane for the prediction and residual signal
+  /* */ uint8_t* get_image_plane_prediction(int cIdx)       { return pixels_prediction[cIdx]; }
+  const uint8_t* get_image_plane_prediction(int cIdx) const { return pixels_prediction[cIdx]; }
+  /* */ uint8_t* get_image_plane_residual(int cIdx)       { return pixels_residual[cIdx]; }
+  const uint8_t* get_image_plane_residual(int cIdx) const { return pixels_residual[cIdx]; }
+  /* */ uint8_t* get_image_plane_tr_coeff(int cIdx)       { return pixels_tr_coeff[cIdx]; }
+  const uint8_t* get_image_plane_tr_coeff(int cIdx) const { return pixels_tr_coeff[cIdx]; }
+
   void set_image_plane(int cIdx, uint8_t* mem, int stride, void *userdata);
+
+  // Set the image planes for the prediction/residual/trCoeff planes
+  void set_image_plane_prediction(int cIdx, uint8_t* mem);
+  void set_image_plane_residual(int cIdx, uint8_t* mem);
+  void set_image_plane_tr_coeff(int cIdx, uint8_t* mem);
 
   uint8_t* get_image_plane_at_pos(int cIdx, int xpos,int ypos)
   {
@@ -275,6 +288,27 @@ struct de265_image {
   {
     int stride = get_image_stride(cIdx);
     return (pixel_t*)(pixels[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
+  }
+
+  template <class pixel_t>
+  pixel_t* get_image_plane_prediction_at_pos_NEW(int cIdx, int xpos,int ypos)
+  {
+    int stride = get_image_stride(cIdx);
+    return (pixel_t*)(pixels_prediction[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
+  }
+
+  template <class pixel_t>
+  pixel_t* get_image_plane_residual_at_pos_NEW(int cIdx, int xpos,int ypos)
+  {
+    int stride = get_image_stride(cIdx);
+    return (pixel_t*)(pixels_residual[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
+  }
+
+  template <class pixel_t>
+  pixel_t* get_image_plane_tr_coeff_at_pos_NEW(int cIdx, int xpos,int ypos)
+  {
+    int stride = get_image_stride(cIdx);
+    return (pixel_t*)(pixels_tr_coeff[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
   }
 
   const uint8_t* get_image_plane_at_pos(int cIdx, int xpos,int ypos) const
@@ -354,6 +388,12 @@ private:
   uint8_t* pixels[3];
   uint8_t  bpp_shift[3];  // 0 for 8 bit, 1 for 16 bit
 
+  // The pixel data for the prediction and residual components.
+  // These are only allocated and filled if explicitly enabled before deocoding is started.
+  uint8_t* pixels_prediction[3];
+  uint8_t* pixels_residual[3];
+  uint8_t* pixels_tr_coeff[3];
+
   enum de265_chroma chroma_format;
 
   int width, height;  // size in luma pixels
@@ -417,6 +457,9 @@ public:
   // --- conformance cropping window ---
 
   uint8_t* pixels_confwin[3];   // pointer to pixels in the conformance window
+  uint8_t* pixels_confwin_prediction[3]; 
+  uint8_t* pixels_confwin_residual[3];
+  uint8_t* pixels_confwin_tr_coeff[3];
 
   int width_confwin, height_confwin;
   int chroma_width_confwin, chroma_height_confwin;
@@ -1117,7 +1160,77 @@ public:
 		  tuInfo[i] = tu_info[i];
 	  }
   }
-  
+
+  void internals_set_residual_CU_signal_to_zero(int x, int y, int w)
+  {
+    internals_set_CU_signal_to_zero(x, y, w, 1);
+  }
+
+  void internals_set_tr_coeff_CU_signal_to_zero(int x, int y, int w)
+  {
+    internals_set_CU_signal_to_zero(x, y, w, 2);
+  }
+
+private:
+  // Set the residual data for the CU (Luma and Chroma) to the 'middle' value depending on the bit depth (128 for 8 bit)
+  // The parameters are: The x and y pixel position of the CU in the frame. w: the width/height of the CU.
+  void internals_set_CU_signal_to_zero(int x, int y, int w, int plane)
+  {
+    for (int cIdx = 0; cIdx < 3; cIdx++)
+    {
+      if ((plane == 0 && get_image_plane_prediction(cIdx) == NULL) ||
+          (plane == 1 && get_image_plane_residual(cIdx) == NULL) ||
+          (plane == 2 && get_image_plane_tr_coeff(cIdx) == NULL))
+        continue;
+
+      int bd = get_bit_depth(cIdx);
+      int stride = get_image_stride(cIdx);
+      int xT = (cIdx == 0) ? x : x / SubWidthC;
+      int yT = (cIdx == 0) ? y : y / SubHeightC;
+      int width = (cIdx == 0) ? w : w / SubHeightC;
+      int height = (cIdx == 0) ? w : w / SubHeightC;
+      int imageHeight = get_height(cIdx);
+      if (imageHeight < yT + height)
+        height = imageHeight - yT;
+      if (bd <= 8)
+      {
+        // One byte per value
+        uint8_t *pix;
+        if (plane == 0)
+          pix = get_image_plane_prediction_at_pos_NEW<uint8_t>(cIdx, xT,yT);
+        else if (plane == 1)
+          pix = get_image_plane_residual_at_pos_NEW<uint8_t>(cIdx, xT,yT);
+        else if (plane == 2)
+          pix = get_image_plane_tr_coeff_at_pos_NEW<uint8_t>(cIdx, xT,yT);
+        else
+          return;
+
+        uint8_t middleValue = (1 << (bd-1));
+        for (int y = 0; y < height; y++)
+          memset(pix + y*stride, middleValue, width);
+      }
+      else if (bd <= 16)
+      {
+        // Two bytes per value
+        uint16_t *pix;
+        if (plane == 0)
+          pix = get_image_plane_prediction_at_pos_NEW<uint16_t>(cIdx, xT,yT);
+        else if (plane == 1)
+          pix = get_image_plane_residual_at_pos_NEW<uint16_t>(cIdx, xT,yT);
+        else if (plane == 2)
+          pix = get_image_plane_tr_coeff_at_pos_NEW<uint16_t>(cIdx, xT,yT);
+        else
+          return;
+
+        uint16_t middleValue = (1 << (bd-1));
+        for (int y = 0; y < height; y++)
+          memset(pix + y*stride, middleValue, width);
+      }
+      else
+        // > 16 bit not supported
+        assert(false);
+    }
+  }
 };
 
 

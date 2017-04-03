@@ -151,6 +151,51 @@ static int  de265_image_get_buffer(de265_decoder_context* ctx,
   img->set_image_plane(0, p[0], luma_stride, NULL);
   img->set_image_plane(1, p[1], chroma_stride, NULL);
   img->set_image_plane(2, p[2], chroma_stride, NULL);
+  
+  // Allocate buffers for prediction/residual/trCoeff
+  decoder_context* decCtx = (decoder_context*)ctx;
+  for (int i = 0; i < 3; i++)
+  {
+    if ((i==0 && !decCtx->param_internals_save_prediction) ||
+        (i==1 && !decCtx->param_internals_save_residual) ||
+        (i==2 && !decCtx->param_internals_save_tr_coeff))
+      continue;
+
+    p[0] = (uint8_t *)ALLOC_ALIGNED_16(luma_height * luma_bpl + MEMORY_PADDING);
+    if (p[0]==NULL) { alloc_failed=true; }
+
+    if (img->get_chroma_format() != de265_chroma_mono) {
+      p[1] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
+      p[2] = (uint8_t *)ALLOC_ALIGNED_16(chroma_height * chroma_bpl + MEMORY_PADDING);
+
+      if (p[1]==NULL || p[2]==NULL) { alloc_failed=true; }
+    }
+    else {
+      p[1] = NULL;
+      p[2] = NULL;
+      chroma_stride = 0;
+    }
+
+    if (alloc_failed) {
+      for (int i=0;i<3;i++)
+        if (p[i]) {
+          FREE_ALIGNED(p[i]);
+        }
+
+      return 0;
+    }
+
+    // Set the buffers
+    for (int j = 0; j < 3; j++)
+    {
+      if (i == 0)
+        img->set_image_plane_prediction(j, p[j]);
+      else if (i == 1)
+        img->set_image_plane_residual(j, p[j]);
+      else if (i == 2)
+        img->set_image_plane_tr_coeff(j, p[j]);
+    }
+  }
 
   return 1;
 }
@@ -160,6 +205,21 @@ static void de265_image_release_buffer(de265_decoder_context* ctx,
 {
   for (int i=0;i<3;i++) {
     uint8_t* p = (uint8_t*)img->get_image_plane(i);
+    if (p) {
+      FREE_ALIGNED(p);
+    }
+
+    p = (uint8_t*)img->get_image_plane_prediction(i);
+    if (p) {
+      FREE_ALIGNED(p);
+    }
+
+    p = (uint8_t*)img->get_image_plane_residual(i);
+    if (p) {
+      FREE_ALIGNED(p);
+    }
+
+    p = (uint8_t*)img->get_image_plane_tr_coeff(i);
     if (p) {
       FREE_ALIGNED(p);
     }
@@ -182,6 +242,20 @@ void de265_image::set_image_plane(int cIdx, uint8_t* mem, int stride, void *user
   else         { this->chroma_stride = stride; }
 }
 
+void de265_image::set_image_plane_prediction(int cIdx, uint8_t* mem)
+{
+  pixels_prediction[cIdx] = mem;
+}
+
+void de265_image::set_image_plane_residual(int cIdx, uint8_t* mem)
+{
+  pixels_residual[cIdx] = mem;
+}
+
+void de265_image::set_image_plane_tr_coeff(int cIdx, uint8_t* mem)
+{
+  pixels_tr_coeff[cIdx] = mem;
+}
 
 uint32_t de265_image::s_next_image_ID = 0;
 
@@ -201,7 +275,14 @@ de265_image::de265_image()
   for (int c=0;c<3;c++) {
     pixels[c] = NULL;
     pixels_confwin[c] = NULL;
+    pixels_confwin_prediction[c] = NULL;
+    pixels_confwin_residual[c] = NULL;
+    pixels_confwin_tr_coeff[c] = NULL;
     plane_user_data[c] = NULL;
+
+    pixels_prediction[c] = NULL;
+    pixels_residual[c] = NULL;
+    pixels_tr_coeff[c] = NULL;
   }
 
   width=height=0;
@@ -399,6 +480,24 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     pixels_confwin[1] = pixels[1] + left + top*chroma_stride;
     pixels_confwin[2] = pixels[2] + left + top*chroma_stride;
 
+    if (pixels_prediction[0])
+    {
+      pixels_confwin_prediction[0] = pixels_prediction[0] + left*WinUnitX + top*WinUnitY*stride;
+      pixels_confwin_prediction[1] = pixels_prediction[1] + left + top*chroma_stride;
+      pixels_confwin_prediction[2] = pixels_prediction[2] + left + top*chroma_stride;
+    }
+    if (pixels_residual[0])
+    {
+      pixels_confwin_residual[0] = pixels_residual[0] + left*WinUnitX + top*WinUnitY*stride;
+      pixels_confwin_residual[1] = pixels_residual[1] + left + top*chroma_stride;
+      pixels_confwin_residual[2] = pixels_residual[2] + left + top*chroma_stride;
+    }
+    if (pixels_tr_coeff[0])
+    {
+      pixels_confwin_tr_coeff[0] = pixels_tr_coeff[0] + left*WinUnitX + top*WinUnitY*stride;
+      pixels_confwin_tr_coeff[1] = pixels_tr_coeff[1] + left + top*chroma_stride;
+      pixels_confwin_tr_coeff[2] = pixels_tr_coeff[2] + left + top*chroma_stride;
+    }
 
     // check for memory shortage
 
@@ -497,6 +596,9 @@ void de265_image::release()
         {
           pixels[i] = NULL;
           pixels_confwin[i] = NULL;
+          pixels_confwin_prediction[i] = NULL;
+          pixels_confwin_residual[i] = NULL;
+          pixels_confwin_tr_coeff[i] = NULL;
         }
     }
 

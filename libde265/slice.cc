@@ -3020,6 +3020,9 @@ void read_coding_tree_unit(thread_context* tctx)
 
   img->set_SliceHeaderIndex(xCtbPixels,yCtbPixels, shdr->slice_index);
 
+  img->internals_set_residual_CU_signal_to_zero(xCtbPixels, yCtbPixels, (1 << sps.Log2CtbSizeY));
+  img->internals_set_tr_coeff_CU_signal_to_zero(xCtbPixels, yCtbPixels, (1 << sps.Log2CtbSizeY));
+
   int CtbAddrInSliceSeg = tctx->CtbAddrInRS - shdr->slice_segment_address;
 
   if (shdr->slice_sao_luma_flag || shdr->slice_sao_chroma_flag)

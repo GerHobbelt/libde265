@@ -1108,6 +1108,22 @@ void decode_intra_prediction_internal(de265_image* img,
     }
     break;
   }
+
+  // Save the intra prediction signal before the residual is added (if enabled)
+  if (img->get_image_plane_prediction(cIdx))
+  {
+    pixel_t* resi_src = dst;
+    pixel_t* resi_dst = img->get_image_plane_prediction_at_pos_NEW<pixel_t>(cIdx,xB0,yB0);
+    for (int y=0;y<nT;y++)
+    {
+      for (int x=0;x<nT;x++)
+      {
+        resi_dst[x] = resi_src[x];
+      }
+      resi_dst += dstStride;
+      resi_src += dstStride;
+    }
+  }
 }
 
 
@@ -1136,30 +1152,6 @@ void decode_intra_prediction(de265_image* img,
                                               img->get_image_stride(cIdx),
                                               nT,cIdx);
   }
-}
-
-
-// TODO: remove this
-template <> void decode_intra_prediction<uint8_t>(de265_image* img,
-                                                  int xB0,int yB0,
-                                                  enum IntraPredMode intraPredMode,
-                                                  uint8_t* dst, int nT, int cIdx)
-{
-    decode_intra_prediction_internal<uint8_t>(img,xB0,yB0, intraPredMode,
-                                              dst,nT,
-                                              nT,cIdx);
-}
-
-
-// TODO: remove this
-template <> void decode_intra_prediction<uint16_t>(de265_image* img,
-                                                   int xB0,int yB0,
-                                                   enum IntraPredMode intraPredMode,
-                                                   uint16_t* dst, int nT, int cIdx)
-{
-  decode_intra_prediction_internal<uint16_t>(img,xB0,yB0, intraPredMode,
-                                             dst,nT,
-                                             nT,cIdx);
 }
 
 

@@ -20,6 +20,56 @@
 
 #include "de265_internals.h"
 #include "image.h"
+#include "decctx-multilayer.h"
+
+LIBDE265_API void de265_internals_set_parameter_bool(de265_decoder_context* de265ctx, enum de265_internals_param param, int value)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  switch (param)
+  {
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_PREDICTION:
+    ctx->param_internals_save_prediction = (value != 0);
+    break;
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_RESIDUAL:
+    ctx->param_internals_save_residual = (value != 0);
+    break;
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_TR_COEFF:
+    ctx->param_internals_save_tr_coeff = (value != 0);
+    break;
+  default:
+    assert(false);
+    break;
+  }
+
+  ctx->update_parameters();
+}
+
+LIBDE265_API const uint8_t* de265_internals_get_image_plane(const struct de265_image* img, de265_internals_param signal, int channel, int* out_stride)
+{
+  assert(channel>=0 && channel <= 2);
+
+  uint8_t* data = NULL;
+  switch (signal)
+  {
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_PREDICTION:
+    data = img->pixels_confwin_prediction[channel];
+    break;
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_RESIDUAL:
+    data = img->pixels_confwin_residual[channel];
+    break;
+  case DE265_INTERNALS_DECODER_PARAM_SAVE_TR_COEFF:
+    data = img->pixels_confwin_tr_coeff[channel];
+    break;
+  default:
+    assert(false);
+    break;
+  }
+  
+  if (out_stride) *out_stride = img->get_image_stride(channel) * ((de265_get_bits_per_pixel(img, channel)+7) / 8);
+
+  return data;
+}
 
 LIBDE265_API void de265_internals_get_CTB_Info_Layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize)
 {

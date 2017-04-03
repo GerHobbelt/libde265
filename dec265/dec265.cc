@@ -21,6 +21,7 @@
 #define DO_MEMORY_LOGGING 0
 
 #include "de265.h"
+#include "de265_internals.h"
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -136,6 +137,7 @@ static void write_picture(const de265_image* img)
   for (int c=0;c<3;c++) {
     int stride;
     const uint8_t* p = de265_get_image_plane(img, c, &stride);
+    //const uint8_t* p = de265_internals_get_image_plane(img, DE265_INTERNALS_DECODER_PARAM_SAVE_TR_COEFF, c, &stride);
 
     int width = de265_get_image_width(img,c);
 
@@ -666,6 +668,11 @@ int main(int argc, char** argv)
   if (no_acceleration) {
     de265_set_parameter_int(ctx, DE265_DECODER_PARAM_ACCELERATION_CODE, de265_acceleration_SCALAR);
   }
+
+  // Also save the prediction and residual 
+  //de265_internals_set_parameter_bool(ctx, DE265_INTERNALS_DECODER_PARAM_SAVE_PREDICTION, true);
+  //de265_internals_set_parameter_bool(ctx, DE265_INTERNALS_DECODER_PARAM_SAVE_RESIDUAL, true);
+  de265_internals_set_parameter_bool(ctx, DE265_INTERNALS_DECODER_PARAM_SAVE_TR_COEFF, true);
 
   if (!logging) {
     de265_disable_logging();

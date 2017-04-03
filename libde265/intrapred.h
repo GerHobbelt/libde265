@@ -102,10 +102,4 @@ void decode_intra_prediction_from_tree(const de265_image* img,
                                        const class seq_parameter_set& sps,
                                        int cIdx);
 
-// TODO: remove this
-template <class pixel_t> void decode_intra_prediction(de265_image* img,
-                                                      int xB0,int yB0,
-                                                      enum IntraPredMode intraPredMode,
-                                                      pixel_t* dst, int nT, int cIdx);
-
 #endif

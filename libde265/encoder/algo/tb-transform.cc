@@ -102,12 +102,9 @@ void compute_transform_coeffs(encoder_context* ectx,
     */
 
     //printBlk("residual", blk,tbSize,tbSize);
+    residual = nullptr;
   }
-
-
-
-
-
+  
   // --- forward transform ---
 
   tb->alloc_coeff_memory(cIdx, tbSize);

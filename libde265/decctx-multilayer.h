@@ -91,6 +91,11 @@ public:
   int param_pps_headers_fd;
   int param_slice_headers_fd;
 
+  // Internals parameters for savig the prediction/residual
+  bool param_internals_save_prediction;
+  bool param_internals_save_residual;
+  bool param_internals_save_tr_coeff;
+
   void set_acceleration_functions(enum de265_acceleration);
 
   // Update the parameters of the layer decoders if one of the parameters was changed.

@@ -58,6 +58,16 @@ extern "C" {
 #define LIBDE265_INLINE inline
 #endif
 
+enum de265_internals_param {
+  DE265_INTERNALS_DECODER_PARAM_SAVE_PREDICTION=0,  // If set, the prediction signal will be saved alongside the reconstruction
+  DE265_INTERNALS_DECODER_PARAM_SAVE_RESIDUAL,      // If set, the residual signal will be saved alongside the reconstruction
+  DE265_INTERNALS_DECODER_PARAM_SAVE_TR_COEFF       // If set, the transform coefficients will be saved alongside the reconstruction
+};
+
+LIBDE265_API void de265_internals_set_parameter_bool(de265_decoder_context*, enum de265_internals_param param, int value);
+
+LIBDE265_API const uint8_t* de265_internals_get_image_plane(const struct de265_image* img, de265_internals_param signal, int channel, int* out_stride);
+
 /// Get the number of CTBs in the image
 LIBDE265_API void de265_internals_get_CTB_Info_Layout(const struct de265_image *img, int *widthInUnits, int *heightInUnits, int *log2UnitSize);
 

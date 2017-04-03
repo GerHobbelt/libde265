@@ -376,10 +376,6 @@ void scale_coefficients_internal(thread_context* tctx,
   coeff = tctx->coeffBuf;
   coeffStride = nT;
 
-
-
-
-
   pixel_t* pred;
   int      stride;
   pred = tctx->img->get_image_plane_at_pos_NEW<pixel_t>(cIdx, xT,yT);
@@ -388,6 +384,30 @@ void scale_coefficients_internal(thread_context* tctx,
   // We explicitly include the case for sizeof(pixel_t)==1 so that the compiler
   // can optimize away a lot of code for 8-bit pixels.
   const int bit_depth = ((sizeof(pixel_t)==1) ? 8 : sps.get_bit_depth(cIdx));
+
+  // We will put the residual values here (if the buffer is valid)
+  pixel_t* resi = NULL;
+  if (tctx->img->get_image_plane_residual(cIdx) != NULL)
+    resi = tctx->img->get_image_plane_residual_at_pos_NEW<pixel_t>(cIdx, xT,yT);
+
+  if (tctx->img->get_image_plane_tr_coeff(cIdx) != NULL)
+  {
+    // Copy the transform cofficients
+    pixel_t *tr_coeff = tctx->img->get_image_plane_tr_coeff_at_pos_NEW<pixel_t>(cIdx, xT,yT);
+    int zeroValue = (1 << (bit_depth-1));
+    int height = nT;
+    if (tctx->img->get_height() < yT + nT)
+      height = tctx->img->get_height() - yT;
+    
+    for (int i=0;i<tctx->nCoeff[cIdx];i++) 
+    {
+      int16_t currCoeff = tctx->coeffList[cIdx][i];
+      int y = tctx->coeffPos[cIdx][i] / nT;
+      int x = tctx->coeffPos[cIdx][i] % nT;
+      int16_t c = Clip3(-zeroValue, zeroValue-1, currCoeff);
+      tr_coeff[y*stride + x] = c + zeroValue;
+    }
+  }
 
   //assert(intra == (tctx->img->get_pred_mode(xT,yT)==MODE_INTRA));
   int cuPredModeIntra = (tctx->img->get_pred_mode(xT,yT)==MODE_INTRA);
@@ -432,6 +452,8 @@ void scale_coefficients_internal(thread_context* tctx,
     }
 
     tctx->decctx->acceleration.add_residual(pred,stride, residual,nT, bit_depth);
+    if (resi)
+      tctx->decctx->acceleration.add_residual(resi,stride, residual,nT, bit_depth);
 
     if (rotateCoeffs) {
       memset(coeff, 0, nT*nT*sizeof(int16_t)); // delete all, because we moved the coeffs around
@@ -572,6 +594,8 @@ void scale_coefficients_internal(thread_context* tctx,
       }
 
       tctx->decctx->acceleration.add_residual(pred,stride, residual,nT, bit_depth);
+      if (resi)
+        tctx->decctx->acceleration.add_residual(resi,stride, residual,nT, bit_depth);
 
       if (rotateCoeffs) {
         memset(coeff, 0, nT*nT*sizeof(int16_t)); // delete all, because we moved the coeffs around
@@ -596,10 +620,16 @@ void scale_coefficients_internal(thread_context* tctx,
 
         transform_coefficients_explicit(tctx, coeff, coeffStride, nT, trType,
                                         pred, stride, bit_depth, cIdx);
+        if (resi)
+          transform_coefficients_explicit(tctx, coeff, coeffStride, nT, trType,
+            resi, stride, bit_depth, cIdx);
       }
       else {
         transform_coefficients(&tctx->decctx->acceleration, coeff, coeffStride, nT, trType,
                                pred, stride, bit_depth);
+        if (resi)
+          transform_coefficients(&tctx->decctx->acceleration, coeff, coeffStride, nT, trType,
+            resi, stride, bit_depth);
       }
     }
   }

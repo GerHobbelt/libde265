@@ -47,6 +47,9 @@ decoder_context_multilayer::decoder_context_multilayer()
   param_vps_headers_fd = -1;
   param_pps_headers_fd = -1;
   param_slice_headers_fd = -1;
+  param_internals_save_prediction = false;
+  param_internals_save_residual = false;
+  param_internals_save_tr_coeff = false;
 
   // Init by creating one decoder context (there has to be at least one layer in the bitstream)
   num_layer_decoders = 0;
@@ -164,6 +167,9 @@ decoder_context* decoder_context_multilayer::get_layer_dec(int layer_id)
     layer_decoders[layer_id]->param_pps_headers_fd = param_pps_headers_fd;
     layer_decoders[layer_id]->param_slice_headers_fd = param_slice_headers_fd;
     layer_decoders[layer_id]->set_acceleration_functions(param_acceleration);
+    layer_decoders[layer_id]->param_internals_save_prediction = param_internals_save_prediction;
+    layer_decoders[layer_id]->param_internals_save_residual = param_internals_save_residual;
+    layer_decoders[layer_id]->param_internals_save_tr_coeff = param_internals_save_tr_coeff;
 
     num_layer_decoders++;
   }
@@ -329,6 +335,9 @@ void decoder_context_multilayer::update_parameters()
     layer_decoders[i]->param_vps_headers_fd = param_vps_headers_fd;
     layer_decoders[i]->param_pps_headers_fd = param_pps_headers_fd;
     layer_decoders[i]->param_slice_headers_fd = param_slice_headers_fd;
+    layer_decoders[i]->param_internals_save_prediction = param_internals_save_prediction;
+    layer_decoders[i]->param_internals_save_residual = param_internals_save_residual;
+    layer_decoders[i]->param_internals_save_tr_coeff = param_internals_save_tr_coeff;
   }
 }
 
