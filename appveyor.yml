@@ -2,8 +2,7 @@
 # https://ci.appveyor.com/project/strukturag/libde265
 version: #{build}
 
-os:
-  - Windows Server 2016
+image: Visual Studio 2017
 
 environment:
   matrix:
