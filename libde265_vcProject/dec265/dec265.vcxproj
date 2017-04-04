@@ -114,6 +114,7 @@
       <SDLCheck>false</SDLCheck>
       <AdditionalIncludeDirectories>C:\D\Temp\libde265_internals;C:\D\Temp\libde265_internals\extra;C:\D\Temp\libde265_internals\libde265;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>

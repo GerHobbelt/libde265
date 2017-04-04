@@ -47,6 +47,9 @@ if(NOT ${DISABLE_SSE} EQUAL OFF)
   endif()
 endif()
 
+set(CMAKE_CXX_FLAGS_DEBUG "/MTd")
+set(CMAKE_CXX_FLAGS_RELEASE "/MT")
+
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_BINARY_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/libde265")

@@ -118,6 +118,7 @@
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WIN32_WINNT=0x0400;LIBDE265_EXPORTS;_CRT_SECURE_NO_WARNINGS;HAVE_SSE4_1;NOMINMAX;HAVE_STDINT_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\D\Temp\libde265_internals;C:\D\Temp\libde265_internals\libde265;C:\D\Temp\libde265_internals\extra;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
