@@ -7,7 +7,7 @@ os:
 
 environment:
   matrix:
-    - GENERATOR: "Visual Studio 12 2013"
+    - GENERATOR: "Visual Studio 12 2017"
 
 platform:
   - x64
@@ -17,9 +17,6 @@ configuration:
 
 build:
   verbosity: normal
-
-install:
-  - git clone https://github.com/strukturag/libde265-data.git
 
 build_script:
   - ps: if($env:PLATFORM -eq "x64") { $env:CMAKE_GEN_SUFFIX=" Win64" }
