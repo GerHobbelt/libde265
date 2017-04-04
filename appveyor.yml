@@ -7,7 +7,7 @@ os:
 
 environment:
   matrix:
-    - GENERATOR: "Visual Studio 12 2017"
+    - GENERATOR: "Visual Studio 15 2017"
 
 platform:
   - x64
