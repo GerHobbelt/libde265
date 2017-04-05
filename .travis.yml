@@ -30,5 +30,6 @@ after_success:
 deploy:
   # We need the compiled files
   skip_cleanup: true
+  - ls -l
   
   
