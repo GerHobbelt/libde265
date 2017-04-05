@@ -7,27 +7,40 @@ git:
 # safelist
 branches:
   only:
-  - internal
-  - travisCITest
-  
+    - internal
+    - travisCITest
+
 before_install:
-  # We need cmake
-  - sudo add-apt-repository -y ppa:kalakris/cmake
-  - sudo apt-get update -qq
-  - sudo apt-get install cmake
+   # We need cmake
+   - sudo add-apt-repository -y ppa:kalakris/cmake
+   - sudo apt-get update -qq
+   - sudo apt-get install cmake
 
 before_script:
   - pwd
-  - cmake .
+  - mkdir release
+  - cd release
+  - cmake -DCMAKE_BUILD_TYPE=Release ..
 
 script:
   - make
-  
+
 after_success:
   # Here we could deploy the binariies
+  - pwd
   - ls
 
+before_deploy:
+  - pwd
+
 #deploy:
-  # We need the compiled files
-  #skip_cleanup: true
+# We need the compiled files
+skip_cleanup: true
+on: internal
+provider: bintray
+file: .bintray.deploy
+user: christianfeldmann
+key:
+  secure: "mTpDD4hQRlahhvIELsUW3t/OxRaRmjETCGRU/qitk3IIuDfoPvjxZMW/1+ynVPw+XZFbCa0ghe/oMUWsS1VIicU5hIKVt6O3bRU52qjMW785kSTk4KWNLSHt9jrcBxU6XPhmx+EliBuFlTRTYrtbCZlMlmZnF4H4cQqR2+jJtPG0Njt799FVCF4U/AEjnuraHQiJ9soajH+ruFcU4ywu7XLWipTY9d9mB+8nMqlAewEZ+ere8E0cuHZyXbFfI26nhc1zq4lxcjgUOELgS5cd6Ai90FsvVgb3Vt0z2qL3KyyLpNHcUSL43JFEYtn/eDaYysEsLQU0hq0SyF5WdMb0nDEI+cAmEf5aoK0hr8eR7oM0TsZaQEpo3SR7KG0wJptuPRcGCDltBT70YOwn8UtkC6VC1STbKkuj/4ARnCf9reeJw/ZxfgVsUv5Al1gW/8Y7eJ8kO0AZbIPNc56W/Kbu7yPS9vTGbO80c9DYd89/WkSuiL/gzS3mo9SWQPPWwQ6KEY0KOARUWLmbFCnVWcMy0OeDIqO3Rt9+RqTXNi2XLJcFY0kHBp835UHXHxabdbPnSY5H0773IFaX/jg4l2Fua6Df5fNF4gc6Q+LGaw4ExngeUH/iyFUXcwnP7hhuw0Mfd+2hjRuDMVBWetq2FK4idvoijh0qOIvA3XYK6VpiLIY="
+  
   
