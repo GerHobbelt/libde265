@@ -18,7 +18,8 @@ before_install:
   - sudo apt-get install cmake
 
 before_script:
-  - cmake
+  - pwd
+  - cmake .
 
 script:
   - make
