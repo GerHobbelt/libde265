@@ -4,7 +4,7 @@
 		"repo": " libde265_Internal",
 		"subject": "christianfeldmann",
 		"desc": "Libde265 internal binaries built by travis ci",
-		"website_url": "www.jfrog.com",
+		"website_url": "https://github.com/ChristianFeldmann/libde265",
 		"issue_tracker_url": "https://github.com/ChristianFeldmann/libde265/issues",
 		"vcs_url": "https://github.com/ChristianFeldmann/libde265.git",
 		"github_use_tag_release_notes": true,
@@ -15,9 +15,9 @@
 	},
 
 	"version": {
-		"name": "${project.version}",
-		"vcs_tag": "${project.version}",
-		"released": "${build.timestamp}"
+		"name": "0.1b",
+		"vcs_tag": "0.1b",
+		"released": "2017-04-05"
 	},
 
 	"files": [{
