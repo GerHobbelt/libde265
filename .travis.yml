@@ -1,4 +1,3 @@
-
 language: cpp
 compiler:
   - gcc
@@ -26,10 +25,9 @@ script:
   
 after_success:
   # Here we could deploy the binariies
-  
-deploy:
+  - ls
+
+#deploy:
   # We need the compiled files
-  skip_cleanup: true
-  - ls -l
-  
+  #skip_cleanup: true
   
