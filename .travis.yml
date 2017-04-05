@@ -1,28 +1,33 @@
-# stats available at
-# https://travis-ci.org/strukturag/libde265/
+
 language: cpp
 compiler:
   - gcc
-env:
-  - HOST= 
-  - HOST=cmake
-  
-matrix:
-  include:
-    - compiler: clang
-      env: HOST=
+git:
+  depth: 3
 
+# safelist
+branches:
+  only:
+  - internal
+  - travisCITest
+  
 before_install:
+  # We need cmake
   - sudo add-apt-repository -y ppa:kalakris/cmake
   - sudo apt-get update -qq
   - sudo apt-get install cmake
 
 before_script:
-  - if [ "$HOST" = "cmake" ]; then cmake .; fi
+  - cmake
 
 script:
-  - sh -c "if [ -z "$HOST" ] && [ -z "$DECODESTREAMS" ]; then ./scripts/check_licenses.sh; fi"
   - make
-  - sh -c "if [ -z "$HOST" ] && [ -z "$DECODESTREAMS" ]; then make dist && mkdir dist-test && cd dist-test && tar xzf ../libde265-*.tar.gz && cd libde265-* && ./configure && make; fi"
-  - sh -c "if [ -z "$HOST" ] && [ -z "$DECODESTREAMS" ]; then make dist && mkdir dist-cmake-test && cd dist-cmake-test && tar xzf ../libde265-*.tar.gz && cd libde265-* && cmake . && make; fi"
+  
+after_success:
+  # Here we could deploy the binariies
+  
+deploy:
+  # We need the compiled files
+  skip_cleanup: true
+  
   
