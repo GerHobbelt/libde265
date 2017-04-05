@@ -21,7 +21,7 @@
 	},
 
 	"files": [
-	  {"includePattern": "release/libde265/libde265.so", "uploadPattern": "libde265.so"}
+	  {"includePattern": "release/libde265/libde265.so", "uploadPattern": "libde265.so", "matrixParams": { "override": 1 }}
 	],
 	"publish": true
 }
