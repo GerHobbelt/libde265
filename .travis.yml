@@ -8,7 +8,6 @@ git:
 branches:
   only:
     - internal
-    - travisCITest
 
 before_install:
    # We need cmake
@@ -17,7 +16,6 @@ before_install:
    - sudo apt-get install cmake
 
 before_script:
-  - pwd
   - mkdir release
   - cd release
   - cmake -DCMAKE_BUILD_TYPE=Release ..
@@ -25,20 +23,13 @@ before_script:
 script:
   - make
 
-after_success:
-  # Here we could deploy the binariies
-  - pwd
-  - ls
-
 before_deploy:
   - cd ..
-  - pwd
-  - ls
 
 deploy:
   # We need the compiled files
   skip_cleanup: true
-  on: travisCITest
+  on: internal
   provider: bintray
   file: .bintray.deploy
   user: christianfeldmann
