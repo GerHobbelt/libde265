@@ -31,7 +31,9 @@ after_success:
   - ls
 
 before_deploy:
+  - cd ..
   - pwd
+  - ls
 
 deploy:
   # We need the compiled files

@@ -21,7 +21,7 @@
 
     "files":
         [
-        {"includePattern": "libde265/libde265.so"},
+        {"includePattern": "release/libde265/libde265.so"},
         ],
     "publish": true
 }
