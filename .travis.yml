@@ -36,7 +36,7 @@ before_deploy:
 deploy:
   # We need the compiled files
   skip_cleanup: true
-  on: internal
+  on: travisCITest
   provider: bintray
   file: .bintray.deploy
   user: christianfeldmann
