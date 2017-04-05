@@ -2,7 +2,7 @@
 	"package": {
 		"name": "Libde265_Internal_Builds",
 		"repo": " libde265_Internal",
-		"subject": "Christian Feldmann",
+		"subject": "christianfeldmann",
 		"desc": "Libde265 internal binaries built by travis ci",
 		"website_url": "www.jfrog.com",
 		"issue_tracker_url": "https://github.com/ChristianFeldmann/libde265/issues",
