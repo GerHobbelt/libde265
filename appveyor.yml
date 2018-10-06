@@ -1,6 +1,6 @@
 # stats available at
 # https://ci.appveyor.com/project/strukturag/libde265
-version: #{build}
+version: {build}
 
 image: Visual Studio 2017
 
