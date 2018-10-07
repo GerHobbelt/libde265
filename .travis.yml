@@ -11,10 +11,6 @@ compiler:
 git:
   depth: 3
 
-branches:
-  only:
-  - internal
-
 before_install: 
 
 before_script:
