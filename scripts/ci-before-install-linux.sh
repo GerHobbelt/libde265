@@ -96,7 +96,10 @@ if [ ! -z "$UPDATE_APT" ]; then
 fi
 
 if [ ! -z "$INSTALL_PACKAGES" ]; then
-    echo "Installing packages $INSTALL_PACKAGES ..."
+    echo "Held packages:"
+    sudo dpkg --get-selections | { grep hold || true; }   # { || true; } prevents CI from exiting when grep returns '1' (no match)
+
+    echo "Installing packages $INSTALL_PACKAGES"
     sudo apt-get install -qq $INSTALL_PACKAGES
 fi
 
