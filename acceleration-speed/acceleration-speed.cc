@@ -24,7 +24,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#else
+#include <windows.h>
+#endif
 #include <getopt.h>
 
 #include <string>

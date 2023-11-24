@@ -101,7 +101,7 @@ void print_bitestim_results(int log2blksize)
 }
 
 
-int main(int argc,char** argv)
+int main(int argc, const char** argv)
 {
   std::string tag = argv[1];
 

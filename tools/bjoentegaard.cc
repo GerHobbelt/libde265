@@ -25,7 +25,11 @@
 #include <string>
 #include <vector>
 #include <math.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#else
+#include <windows.h>
+#endif
 
 
 const bool D = false;

@@ -26,7 +26,11 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#else
+#include <windows.h>
+#endif
 #include <assert.h>
 #include <cstdint>
 #include <string.h>

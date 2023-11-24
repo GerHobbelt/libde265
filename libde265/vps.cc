@@ -392,8 +392,8 @@ void profile_data::write(CABAC_encoder& out) const
 
 void profile_tier_level::write(CABAC_encoder& out, int max_sub_layers) const
 {
-  assert(general.profile_present_flag==true);
-  assert(general.level_present_flag==true);
+  assert(!!general.profile_present_flag);
+  assert(!!general.level_present_flag);
 
   general.write(out);
 
