@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.5.0)
+cmake_minimum_required (VERSION 3.16.3)
 
 project (libde265
     LANGUAGES C CXX
@@ -25,8 +25,6 @@ option(ENABLE_SDL "Enable SDL" ON)
 if (ENABLE_SDL)
 	find_package(SDL2)
 endif()
-
-find_package(Threads REQUIRED)
 
 CHECK_INCLUDE_FILE(malloc.h HAVE_MALLOC_H)
 CHECK_FUNCTION_EXISTS(posix_memalign HAVE_POSIX_MEMALIGN)
