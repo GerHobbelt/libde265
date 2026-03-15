@@ -146,21 +146,22 @@ void slice_segment_header::set_defaults()
 
 bool read_pred_weight_table(bitreader* br, slice_segment_header* shdr, decoder_context* ctx)
 {
-  int vlc;
+  uint32_t uvlc;
+  int32_t svlc;
 
   pic_parameter_set* pps = ctx->get_pps((int)shdr->slice_pic_parameter_set_id);
   assert(pps);
   seq_parameter_set* sps = ctx->get_sps((int)pps->seq_parameter_set_id);
   assert(sps);
 
-  shdr->luma_log2_weight_denom = vlc = get_uvlc(br);
-  if (vlc<0 || vlc>7) return false;
+  shdr->luma_log2_weight_denom = uvlc = get_uvlc(br);
+  if (uvlc>7) return false;
 
   if (sps->chroma_format_idc != 0) {
-    vlc = get_svlc(br);
-    vlc += shdr->luma_log2_weight_denom;
-    if (vlc<0 || vlc>7) return false;
-    shdr->ChromaLog2WeightDenom = vlc;
+    svlc = get_svlc(br);
+    svlc += shdr->luma_log2_weight_denom;
+    if (svlc<0 || svlc>7) return false;
+    shdr->ChromaLog2WeightDenom = svlc;
   }
 
   int sumWeightFlags = 0;
@@ -187,16 +188,16 @@ bool read_pred_weight_table(bitreader* br, slice_segment_header* shdr, decoder_c
 
             // delta_luma_weight
 
-            vlc = get_svlc(br);
-            if (vlc < -128 || vlc > 127) return false;
+            svlc = get_svlc(br);
+            if (svlc < -128 || svlc > 127) return false;
 
-            shdr->LumaWeight[l][i] = (1<<shdr->luma_log2_weight_denom) + vlc;
+            shdr->LumaWeight[l][i] = (1<<shdr->luma_log2_weight_denom) + svlc;
 
             // luma_offset
 
-            vlc = get_svlc(br);
-            if (vlc < -sps->WpOffsetHalfRangeY || vlc > sps->WpOffsetHalfRangeY-1) return false;
-            shdr->luma_offset[l][i] = vlc;
+            svlc = get_svlc(br);
+            if (svlc < -sps->WpOffsetHalfRangeY || svlc > sps->WpOffsetHalfRangeY-1) return false;
+            shdr->luma_offset[l][i] = svlc;
           }
           else {
             shdr->LumaWeight[l][i] = 1<<shdr->luma_log2_weight_denom;
@@ -207,25 +208,25 @@ bool read_pred_weight_table(bitreader* br, slice_segment_header* shdr, decoder_c
             for (int j=0;j<2;j++) {
               // delta_chroma_weight
 
-              vlc = get_svlc(br);
-              if (vlc < -128 || vlc >  127) return false;
+              svlc = get_svlc(br);
+              if (svlc < -128 || svlc >  127) return false;
 
-              shdr->ChromaWeight[l][i][j] = (1<<shdr->ChromaLog2WeightDenom) + vlc;
+              shdr->ChromaWeight[l][i][j] = (1<<shdr->ChromaLog2WeightDenom) + svlc;
 
               // delta_chroma_offset
 
-              vlc = get_svlc(br);
-              if (vlc < -4*sps->WpOffsetHalfRangeC ||
-                  vlc >  4*sps->WpOffsetHalfRangeC-1) return false;
+              svlc = get_svlc(br);
+              if (svlc < -4*sps->WpOffsetHalfRangeC ||
+                  svlc >  4*sps->WpOffsetHalfRangeC-1) return false;
 
-              vlc = Clip3(-sps->WpOffsetHalfRangeC,
+              svlc = Clip3(-sps->WpOffsetHalfRangeC,
                           sps->WpOffsetHalfRangeC-1,
                           (sps->WpOffsetHalfRangeC
-                           +vlc
+                           +svlc
                            -((sps->WpOffsetHalfRangeC*shdr->ChromaWeight[l][i][j])
                              >> shdr->ChromaLog2WeightDenom)));
 
-              shdr->ChromaOffset[l][i][j] = vlc;
+              shdr->ChromaOffset[l][i][j] = svlc;
             }
           else {
             for (int j=0;j<2;j++) {
@@ -359,6 +360,9 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   *continueDecoding = false;
   reset();
 
+  uint32_t uvlc;
+  int32_t svlc;
+
   // set defaults
 
   dependent_slice_segment_flag = 0;
@@ -372,12 +376,12 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     no_output_of_prior_pics_flag = get_bits(br,1);
   }
 
-  slice_pic_parameter_set_id = get_uvlc(br);
-  if (slice_pic_parameter_set_id >= DE265_MAX_PPS_SETS ||
-      slice_pic_parameter_set_id == UVLC_ERROR) {
+  if ((uvlc = get_uvlc(br)) == UVLC_ERROR ||
+      uvlc >= DE265_MAX_PPS_SETS) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
     return DE265_OK;
   }
+  slice_pic_parameter_set_id = uvlc;
 
   if (!ctx->has_pps(slice_pic_parameter_set_id)) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
@@ -400,7 +404,7 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
       dependent_slice_segment_flag = 0;
     }
 
-    int slice_segment_address = get_bits(br, ceil_log2(sps->PicSizeInCtbsY));
+    uint32_t slice_segment_address = get_bits(br, ceil_log2(sps->PicSizeInCtbsY));
 
     if (dependent_slice_segment_flag) {
       if (slice_segment_address == 0) {
@@ -425,8 +429,7 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     slice_segment_address = 0;
   }
 
-  if (slice_segment_address < 0 ||
-      slice_segment_address >= sps->PicSizeInCtbsY) {
+  if (slice_segment_address >= sps->PicSizeInCtbsY) {
     ctx->add_warning(DE265_WARNING_SLICE_SEGMENT_ADDRESS_INVALID, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
@@ -440,13 +443,13 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
       skip_bits(br,1);
     }
 
-    slice_type = get_uvlc(br);
-    if (slice_type > 2 ||
-	slice_type == UVLC_ERROR) {
+    if ((uvlc = get_uvlc(br)) == UVLC_ERROR ||
+	uvlc > 2) {
       ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
       *continueDecoding = false;
       return DE265_OK;
     }
+    slice_type = uvlc;
 
     if (pps->output_flag_present_flag) {
       pic_output_flag = get_bits(br,1);
@@ -499,19 +502,19 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
 
       if (sps->long_term_ref_pics_present_flag) {
         if (sps->num_long_term_ref_pics_sps > 0) {
-          num_long_term_sps = get_uvlc(br);
-          if (num_long_term_sps == UVLC_ERROR) {
+          if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
             return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
           }
+          num_long_term_sps = uvlc;
         }
         else {
           num_long_term_sps = 0;
         }
 
-        num_long_term_pics= get_uvlc(br);
-        if (num_long_term_pics == UVLC_ERROR) {
+        if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
           return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
         }
+        num_long_term_pics = uvlc;
 
         // check maximum number of reference frames
 
@@ -559,10 +562,10 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
 
           delta_poc_msb_present_flag[i] = get_bits(br,1);
           if (delta_poc_msb_present_flag[i]) {
-            delta_poc_msb_cycle_lt[i] = get_uvlc(br);
-            if (delta_poc_msb_cycle_lt[i]==UVLC_ERROR) {
+            if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
               return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
             }
+            delta_poc_msb_cycle_lt[i] = uvlc;
           }
           else {
             delta_poc_msb_cycle_lt[i] = 0;
@@ -620,20 +623,18 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
         slice_type == SLICE_TYPE_B) {
       num_ref_idx_active_override_flag = get_bits(br,1);
       if (num_ref_idx_active_override_flag) {
-        num_ref_idx_l0_active = get_uvlc(br);
-        if (num_ref_idx_l0_active == UVLC_ERROR) {
+        if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
 	  ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
           return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 	}
-        num_ref_idx_l0_active++;;
+        num_ref_idx_l0_active = uvlc + 1;
 
         if (slice_type == SLICE_TYPE_B) {
-          num_ref_idx_l1_active = get_uvlc(br);
-          if (num_ref_idx_l1_active == UVLC_ERROR) {
+          if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
 	    ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 	  }
-          num_ref_idx_l1_active++;
+          num_ref_idx_l1_active = uvlc + 1;
         }
       }
       else {
@@ -693,11 +694,11 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
 
         if (( collocated_from_l0_flag && num_ref_idx_l0_active > 1) ||
             (!collocated_from_l0_flag && num_ref_idx_l1_active > 1)) {
-          collocated_ref_idx = get_uvlc(br);
-          if (collocated_ref_idx == UVLC_ERROR) {
+          if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
 	    ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 	  }
+          collocated_ref_idx = uvlc;
         }
         else {
           collocated_ref_idx = 0;
@@ -723,33 +724,33 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
           }
       }
 
-      five_minus_max_num_merge_cand = get_uvlc(br);
-      if (five_minus_max_num_merge_cand == UVLC_ERROR) {
+      if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
 	ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
+      five_minus_max_num_merge_cand = uvlc;
       MaxNumMergeCand = 5-five_minus_max_num_merge_cand;
     }
 
-    slice_qp_delta = get_svlc(br);
-    if (slice_qp_delta == UVLC_ERROR) {
+    if ((svlc = get_svlc(br)) == SVLC_ERROR) {
       ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+    slice_qp_delta = svlc;
     //logtrace(LogSlice,"slice_qp_delta: %d\n",shdr->slice_qp_delta);
 
     if (pps->pps_slice_chroma_qp_offsets_present_flag) {
-      slice_cb_qp_offset = get_svlc(br);
-      if (slice_cb_qp_offset == UVLC_ERROR) {
+      if ((svlc = get_svlc(br)) == SVLC_ERROR) {
 	ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
+      slice_cb_qp_offset = svlc;
 
-      slice_cr_qp_offset = get_svlc(br);
-      if (slice_cr_qp_offset == UVLC_ERROR) {
+      if ((svlc = get_svlc(br)) == SVLC_ERROR) {
 	ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
+      slice_cr_qp_offset = svlc;
     }
     else {
       slice_cb_qp_offset = 0;
@@ -773,19 +774,17 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     if (deblocking_filter_override_flag) {
       slice_deblocking_filter_disabled_flag = get_bits(br,1);
       if (!slice_deblocking_filter_disabled_flag) {
-        slice_beta_offset = get_svlc(br);
-        if (slice_beta_offset == UVLC_ERROR) {
+        if ((svlc = get_svlc(br)) == SVLC_ERROR) {
 	  ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	  return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 	}
-        slice_beta_offset *= 2;
+        slice_beta_offset = svlc * 2;
 
-        slice_tc_offset   = get_svlc(br);
-        if (slice_tc_offset == UVLC_ERROR) {
+        if ((svlc = get_svlc(br)) == SVLC_ERROR) {
 	  ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	  return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 	}
-        slice_tc_offset   *= 2;
+        slice_tc_offset   = svlc * 2;
       }
     }
     else {
@@ -804,11 +803,11 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   }
 
   if (pps->tiles_enabled_flag || pps->entropy_coding_sync_enabled_flag ) {
-    num_entry_point_offsets = get_uvlc(br);
-    if (num_entry_point_offsets == UVLC_ERROR) {
+    if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
       ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+    num_entry_point_offsets = uvlc;
 
     if (pps->entropy_coding_sync_enabled_flag) {
       // check num_entry_points for valid range
@@ -831,12 +830,11 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
     entry_point_offset.resize( num_entry_point_offsets );
 
     if (num_entry_point_offsets > 0) {
-      offset_len = get_uvlc(br);
-      if (offset_len == UVLC_ERROR) {
+      if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
 	ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
-      offset_len++;
+      offset_len = uvlc + 1;
 
       if (offset_len > 32) {
 	return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
@@ -858,12 +856,12 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   }
 
   if (pps->slice_segment_header_extension_present_flag) {
-    slice_segment_header_extension_length = get_uvlc(br);
-    if (slice_segment_header_extension_length == UVLC_ERROR ||
-	slice_segment_header_extension_length > 1000) {  // TODO: safety check against too large values
+    if ((uvlc = get_uvlc(br)) == UVLC_ERROR ||
+	uvlc > 1000) {  // TODO: safety check against too large values
       ctx->add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+    slice_segment_header_extension_length = uvlc;
 
     for (int i=0; i<slice_segment_header_extension_length; i++) {
       //slice_segment_header_extension_data_byte[i]
@@ -911,8 +909,7 @@ de265_error slice_segment_header::write(error_queue* errqueue, CABAC_encoder& ou
     }
   }
 
-  if (slice_segment_address < 0 ||
-      slice_segment_address > sps->PicSizeInCtbsY) {
+  if (slice_segment_address > sps->PicSizeInCtbsY) {
     errqueue->add_warning(DE265_WARNING_SLICE_SEGMENT_ADDRESS_INVALID, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
@@ -1556,7 +1553,7 @@ static int decode_sao_merge_flag(thread_context* tctx)
 
 
 
-static int decode_sao_type_idx(thread_context* tctx)
+static uint8_t decode_sao_type_idx(thread_context* tctx)
 {
   logtrace(LogSlice,"# sao_type_idx_luma/chroma\n");
 
@@ -1581,11 +1578,12 @@ static int decode_sao_type_idx(thread_context* tctx)
 }
 
 
-static int decode_sao_offset_abs(thread_context* tctx, int bitDepth)
+static uint8_t decode_sao_offset_abs(thread_context* tctx, int bitDepth)
 {
   logtrace(LogSlice,"# sao_offset_abs\n");
   int cMax = (1<<(libde265_min(bitDepth,10)-5))-1;
-  int value = decode_CABAC_TU_bypass(&tctx->cabac_decoder, cMax);
+  assert(cMax >= 7 && cMax<=31);
+  uint8_t value = static_cast<uint8_t>(decode_CABAC_TU_bypass(&tctx->cabac_decoder, cMax));
   logtrace(LogSymbols,"$1 sao_offset_abs=%d\n",value);
   return value;
 }
@@ -1665,8 +1663,6 @@ static int decode_split_cu_flag(thread_context* tctx,
 static int decode_cu_skip_flag(thread_context* tctx,
 			       int x0, int y0, int ctDepth)
 {
-  decoder_context* ctx = tctx->decctx;
-
   // check if neighbors are available
 
   int availableL = check_CTB_available(tctx->img, x0,y0, x0-1,y0);
@@ -2737,8 +2733,8 @@ void read_sao(thread_context* tctx, int xCtb,int yCtb,
              tctx->CtbAddrInRS,
              sps.PicWidthInCtbsY,
              shdr->slice_segment_address);
-    char upCtbInSliceSeg = (tctx->CtbAddrInRS - sps.PicWidthInCtbsY) >= shdr->SliceAddrRS;
-    char upCtbInTile = (pps.TileIdRS[xCtb +  yCtb    * sps.PicWidthInCtbsY] ==
+    bool upCtbInSliceSeg = (tctx->CtbAddrInRS - sps.PicWidthInCtbsY) >= shdr->SliceAddrRS;
+    bool upCtbInTile = (pps.TileIdRS[xCtb +  yCtb    * sps.PicWidthInCtbsY] ==
                         pps.TileIdRS[xCtb + (yCtb-1) * sps.PicWidthInCtbsY]);
 
     if (upCtbInSliceSeg && upCtbInTile) {
@@ -2758,12 +2754,12 @@ void read_sao(thread_context* tctx, int xCtb,int yCtb,
         uint8_t SaoTypeIdx = 0;
 
         if (cIdx==0) {
-          char sao_type_idx_luma = decode_sao_type_idx(tctx);
+          uint8_t sao_type_idx_luma = decode_sao_type_idx(tctx);
           logtrace(LogSlice,"sao_type_idx_luma: %d\n", sao_type_idx_luma);
           saoinfo.SaoTypeIdx = SaoTypeIdx = sao_type_idx_luma;
         }
         else if (cIdx==1) {
-          char sao_type_idx_chroma = decode_sao_type_idx(tctx);
+          uint8_t sao_type_idx_chroma = decode_sao_type_idx(tctx);
           logtrace(LogSlice,"sao_type_idx_chroma: %d\n", sao_type_idx_chroma);
           SaoTypeIdx = sao_type_idx_chroma;
           saoinfo.SaoTypeIdx |= SaoTypeIdx<<(2*1);
@@ -3655,8 +3651,8 @@ int read_transform_unit(thread_context* tctx,
     }
 
   // position of TU in local CU
-  int xL = x0 - xCUBase;
-  int yL = y0 - yCUBase;
+  //int xL = x0 - xCUBase;
+  //int yL = y0 - yCUBase;
   int nT = 1<<log2TrafoSize;
   int nTC = 1<<log2TrafoSizeC;
 
@@ -3677,7 +3673,7 @@ int read_transform_unit(thread_context* tctx,
 
   // --- chroma ---
 
-  const int yOffset422 = 1<<log2TrafoSizeC;
+  //const int yOffset422 = 1<<log2TrafoSizeC;
 
   if (log2TrafoSize>2 || ChromaArrayType == CHROMA_444) {
     // TODO: cross-component prediction
@@ -3814,6 +3810,7 @@ int read_transform_unit(thread_context* tctx,
 }
 
 
+#if 0
 static void dump_cbsize(de265_image* img)
 {
   int w = img->get_width(0);
@@ -3826,6 +3823,7 @@ static void dump_cbsize(de265_image* img)
     printf("\n");
   }
 }
+#endif
 
 
 void read_transform_tree(thread_context* tctx,
@@ -3878,6 +3876,15 @@ void read_transform_tree(thread_context* tctx,
                               (IntraSplitFlag==1 && trafoDepth==0) ||
                               interSplitFlag==1) ? 1:0;
     }
+
+  if (split_transform_flag && log2TrafoSize <= sps.Log2MinTrafoSize) {
+    // TODO: it would be nice to have a flag "ignore_subsequent_errors" since the stream cannot be successfully decoded
+    //       after a bitstream error like this. But that would require that the error_queue is independent for each decoding thread
+    //       and that the flag is reset at a CABAC synchronization point. An alternative would be to simply stop the decoding this slice
+    //       after such an error.
+    img->decctx->add_warning(DE265_WARNING_INVALID_TU_BLOCK_SPLIT, true);
+    split_transform_flag = 0;
+  }
 
   if (split_transform_flag) {
     logtrace(LogSlice,"set_split_transform_flag(%d,%d, %d)\n",x0,y0,trafoDepth);
@@ -4107,6 +4114,11 @@ void read_prediction_unit(thread_context* tctx,
       int ref_idx_l0 = decode_ref_idx_lX(tctx, shdr->num_ref_idx_l0_active);
 
       // NOTE: case for only one reference frame is handles in decode_ref_idx_lX()
+      if (ref_idx_l0 < 0 || ref_idx_l0 >= MAX_NUM_REF_PICS) {
+        tctx->img->integrity = INTEGRITY_DECODING_ERRORS;
+        tctx->decctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+        return;
+      }
       tctx->motion.refIdx[0] = ref_idx_l0;
 
       read_mvd_coding(tctx,x0,y0, 0);
@@ -4122,6 +4134,11 @@ void read_prediction_unit(thread_context* tctx,
       int ref_idx_l1 = decode_ref_idx_lX(tctx, shdr->num_ref_idx_l1_active);
 
       // NOTE: case for only one reference frame is handles in decode_ref_idx_lX()
+      if (ref_idx_l1 < 0 || ref_idx_l1 >= MAX_NUM_REF_PICS) {
+        tctx->img->integrity = INTEGRITY_DECODING_ERRORS;
+        tctx->decctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+        return;
+      }
       tctx->motion.refIdx[1] = ref_idx_l1;
 
       if (shdr->mvd_l1_zero_flag &&
@@ -4683,10 +4700,8 @@ enum DecodeResult decode_substream(thread_context* tctx,
   const pic_parameter_set& pps = tctx->img->get_pps();
   const seq_parameter_set& sps = tctx->img->get_sps();
 
-  const int ctbW = sps.PicWidthInCtbsY;
-
-
-  const int startCtbY = tctx->CtbY;
+  const uint16_t ctbW = sps.PicWidthInCtbsY;
+  const uint16_t startCtbY = tctx->CtbY;
 
   //printf("start decoding substream at %d;%d\n",tctx->CtbX,tctx->CtbY);
 
@@ -4697,7 +4712,8 @@ enum DecodeResult decode_substream(thread_context* tctx,
       tctx->CtbY>=1 && tctx->CtbX==0)
     {
       if (sps.PicWidthInCtbsY>1) {
-        if ((tctx->CtbY-1) >= tctx->imgunit->ctx_models.size()) {
+        assert(tctx->CtbY >= 1);
+        if (static_cast<size_t>(tctx->CtbY-1) >= tctx->imgunit->ctx_models.size()) {
           return Decode_Error;
         }
 
@@ -4718,10 +4734,10 @@ enum DecodeResult decode_substream(thread_context* tctx,
 
 
   do {
-    const int ctbx = tctx->CtbX;
-    const int ctby = tctx->CtbY;
+    const uint32_t ctbx = tctx->CtbX;
+    const uint32_t ctby = tctx->CtbY;
 
-    if (ctbx+ctby*ctbW >= pps.CtbAddrRStoTS.size()) {
+    if (ctbx + ctby * ctbW >= pps.CtbAddrRStoTS.size()) {
         return Decode_Error;
     }
 
@@ -4730,7 +4746,7 @@ enum DecodeResult decode_substream(thread_context* tctx,
         return Decode_Error;
     }
 
-    if (block_wpp && ctby>0 && ctbx < ctbW-1) {
+    if (block_wpp && ctby>0 && ctbx+1 < ctbW) {
 
       // TODO: if we are in tiles mode and at the right border, do not wait for x+1,y-1
 
@@ -4755,7 +4771,7 @@ enum DecodeResult decode_substream(thread_context* tctx,
 
     if (pps.entropy_coding_sync_enabled_flag &&
         ctbx == 1 &&
-        ctby < sps.PicHeightInCtbsY-1)
+        ctby+1 < sps.PicHeightInCtbsY)
       {
         // no storage for context table has been allocated
         if (tctx->imgunit->ctx_models.size() <= ctby) {
@@ -4856,7 +4872,7 @@ bool initialize_CABAC_at_slice_segment_start(thread_context* tctx)
   if (shdr->dependent_slice_segment_flag) {
     int prevCtb = pps.CtbAddrTStoRS[ pps.CtbAddrRStoTS[shdr->slice_segment_address] -1 ];
 
-    int sliceIdx = img->get_SliceHeaderIndex_atIndex(prevCtb);
+    uint16_t sliceIdx = img->get_SliceHeaderIndex_atIndex(prevCtb);
     if (sliceIdx >= img->slices.size()) {
       return false;
     }
@@ -5027,7 +5043,7 @@ de265_error read_slice_segment_data(thread_context* tctx)
 
   de265_image* img = tctx->img;
   const pic_parameter_set& pps = img->get_pps();
-  const seq_parameter_set& sps = img->get_sps();
+  //const seq_parameter_set& sps = img->get_sps();
   slice_segment_header* shdr = tctx->shdr;
 
   bool success = initialize_CABAC_at_slice_segment_start(tctx);
@@ -5041,11 +5057,11 @@ de265_error read_slice_segment_data(thread_context* tctx)
 
   bool first_slice_substream = !shdr->dependent_slice_segment_flag;
 
-  int substream=0;
+  uint32_t substream=0;
 
   enum DecodeResult result;
   do {
-    int ctby = tctx->CtbY;
+    //int ctby = tctx->CtbY;
 
 
     // check whether entry_points[] are correct in the bitstream

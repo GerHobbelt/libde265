@@ -91,7 +91,7 @@ public:
   // --- QP ---
 
   char cu_qp_delta_enabled_flag;
-  int  diff_cu_qp_delta_depth;   // [ 0 ; log2_diff_max_min_luma_coding_block_size ]
+  uint8_t diff_cu_qp_delta_depth;   // [ 0 ; log2_diff_max_min_luma_coding_block_size ]
 
   int  pic_cb_qp_offset;
   int  pic_cr_qp_offset;
@@ -108,8 +108,8 @@ public:
   // --- tiles ---
 
   char tiles_enabled_flag;
-  int  num_tile_columns;  // [1;PicWidthInCtbsY]
-  int  num_tile_rows;     // [1;PicHeightInCtbsY]
+  uint8_t num_tile_columns;  // [1;PicWidthInCtbsY] max DE265_MAX_TILE_COLUMNS
+  uint8_t num_tile_rows;     // [1;PicHeightInCtbsY] max DE265_MAX_TILE_ROWS
   char uniform_spacing_flag;
 
 
@@ -129,7 +129,7 @@ public:
   struct scaling_list_data scaling_list; // contains valid data if sps->scaling_list_enabled_flag set
 
   char lists_modification_present_flag;
-  int log2_parallel_merge_level; // [2 ; log2(max CB size)]
+  uint8_t log2_parallel_merge_level; // [2 ; log2(max CB size)]
   char num_extra_slice_header_bits;
   char slice_segment_header_extension_present_flag;
   char pps_extension_flag;
@@ -151,11 +151,11 @@ public:
   int colBd    [ DE265_MAX_TILE_COLUMNS+1 ];
   int rowBd    [ DE265_MAX_TILE_ROWS+1 ];
 
-  std::vector<int> CtbAddrRStoTS; // #CTBs
-  std::vector<int> CtbAddrTStoRS; // #CTBs
-  std::vector<int> TileId;        // #CTBs  // index in tile-scan order
-  std::vector<int> TileIdRS;      // #CTBs  // index in raster-scan order
-  std::vector<int> MinTbAddrZS;   // #TBs   [x + y*PicWidthInTbsY]
+  std::vector<uint32_t> CtbAddrRStoTS; // #CTBs
+  std::vector<uint32_t> CtbAddrTStoRS; // #CTBs
+  std::vector<uint32_t> TileId;        // #CTBs  // index in tile-scan order
+  std::vector<uint32_t> TileIdRS;      // #CTBs  // index in raster-scan order
+  std::vector<uint32_t> MinTbAddrZS;   // #TBs   [x + y*PicWidthInTbsY]
 
   void set_derived_values(const seq_parameter_set* sps);
 };

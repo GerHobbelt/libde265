@@ -26,18 +26,13 @@ INSTALL_PACKAGES=
 while true; do echo "Still alive at $(date) ..."; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 INSTALL_PACKAGES="$INSTALL_PACKAGES \
-    automake \
     ffmpeg \
-    libtool \
     pkg-config \
-    qt5 \
-    sdl \
+    qt@5 \
+    sdl2 \
     "
 
 if [ ! -z "$INSTALL_PACKAGES" ]; then
-    echo "Remove python@2 ..."
-    brew unlink python@2 || true
-
     echo "Installing packages $INSTALL_PACKAGES ..."
     for package in $INSTALL_PACKAGES; do
         brew list $package &>/dev/null || brew install $package

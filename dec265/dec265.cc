@@ -56,7 +56,7 @@ using namespace videogfx;
 #endif
 
 #if HAVE_SDL
-#include "sdl.hh"
+#include "sdl-display.h"
 #endif
 
 #ifndef PRIu32
@@ -240,6 +240,9 @@ void display_image(const struct de265_image* img)
 }
 #endif
 
+
+#if HAVE_SDL
+
 static uint8_t* convert_to_8bit(const uint8_t* data, int width, int height,
                                 int pixelsPerLine, int bit_depth)
 {
@@ -255,8 +258,6 @@ static uint8_t* convert_to_8bit(const uint8_t* data, int width, int height,
   return out;
 }
 
-
-#if HAVE_SDL
 SDL_YUV_Display sdlWin;
 bool sdl_active=false;
 
@@ -278,6 +279,7 @@ bool display_sdl(const struct de265_image* img)
     case de265_chroma_422:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_422;  break;
     case de265_chroma_444:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_444;  break;
     case de265_chroma_mono: sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO; break;
+      default: assert(false); sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO;
     }
 
     sdlWin.init(width,height, sdlChroma);

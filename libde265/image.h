@@ -91,7 +91,7 @@ template <class DataUnit> class MetaDataArray
 
     if (size != data_size) {
       free(data);
-      data = (DataUnit*)malloc(size * sizeof(DataUnit));
+      data = (DataUnit*)calloc(size, sizeof(DataUnit));
       if (data == NULL) {
         data_size = 0;
         return false;
@@ -378,7 +378,7 @@ public:
   enum PictureState PicState;
   bool PicOutputFlag;
 
-  int32_t removed_at_picture_id;
+  uint32_t removed_at_picture_id;
 
   const video_parameter_set& get_vps() const { return *vps; }
   const seq_parameter_set& get_sps() const { return *sps; }
@@ -396,7 +396,7 @@ public:
   decoder_context*    decctx;
   //class encoder_context*    encctx;
 
-  int number_of_ctbs() const { return ctb_info.size(); }
+  [[nodiscard]] uint32_t number_of_ctbs() const { return static_cast<uint32_t>(ctb_info.size()); }
 
 private:
   // The image also keeps a reference to VPS/SPS/PPS, because when decoding is delayed,
@@ -742,44 +742,44 @@ public:
     ctb_info.get(x,y).SliceHeaderIndex = SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndex(int x, int y) const
+  uint16_t get_SliceHeaderIndex(int x, int y) const
   {
     return ctb_info.get(x,y).SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndexCtb(int ctbX, int ctbY) const
+  uint16_t get_SliceHeaderIndexCtb(int ctbX, int ctbY) const
   {
     return ctb_info[ctbX + ctbY*ctb_info.width_in_units].SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndex_atIndex(int ctb) const
+  uint16_t get_SliceHeaderIndex_atIndex(int ctb) const
   {
     return ctb_info[ctb].SliceHeaderIndex;
   }
 
   bool is_SliceHeader_available(int x,int y) const
   {
-    int idx = ctb_info.get(x,y).SliceHeaderIndex;
-    return idx >= 0 && idx < slices.size();
+    uint16_t idx = ctb_info.get(x,y).SliceHeaderIndex;
+    return idx < slices.size();
   }
 
   slice_segment_header* get_SliceHeader(int x, int y)
   {
-    int idx = get_SliceHeaderIndex(x,y);
+    uint16_t idx = get_SliceHeaderIndex(x,y);
     if (idx >= slices.size()) { return NULL; }
     return slices[idx];
   }
 
   slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY)
   {
-    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    uint16_t idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
     if (idx >= slices.size()) { return NULL; }
     return slices[idx];
   }
 
   const slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY) const
   {
-    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    uint16_t idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
     if (idx >= slices.size()) { return NULL; }
     return slices[idx];
   }

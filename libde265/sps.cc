@@ -63,28 +63,10 @@ extern bool write_short_term_ref_pic_set(error_queue* errqueue,
                                          bool sliceRefPicSet); // is this in the slice header?
 
 
-sps_range_extension::sps_range_extension()
-{
-  transform_skip_rotation_enabled_flag = 0;
-  transform_skip_context_enabled_flag  = 0;
-  implicit_rdpcm_enabled_flag = 0;
-  explicit_rdpcm_enabled_flag = 0;
-  extended_precision_processing_flag = 0;
-  intra_smoothing_disabled_flag = 0;
-  high_precision_offsets_enabled_flag = 0;
-  persistent_rice_adaptation_enabled_flag = 0;
-  cabac_bypass_alignment_enabled_flag = 0;
-}
+sps_range_extension::sps_range_extension() = default;
 
 
-seq_parameter_set::seq_parameter_set()
-{
-  // TODO: this is dangerous
-  //memset(this,0,sizeof(seq_parameter_set));
-
-  sps_read = false;
-  //ref_pic_sets = NULL;
-}
+seq_parameter_set::seq_parameter_set() = default;
 
 
 seq_parameter_set::~seq_parameter_set()
@@ -197,7 +179,7 @@ void seq_parameter_set::set_resolution(int w,int h)
 
 de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
 {
-  int vlc;
+  uint32_t vlc;
 
   video_parameter_set_id = get_bits(br,4);
   sps_max_sub_layers     = get_bits(br,3) +1;
@@ -899,7 +881,7 @@ de265_error read_scaling_list(bitreader* br, const seq_parameter_set* sps,
 
       char scaling_list_pred_mode_flag = get_bits(br,1);
       if (!scaling_list_pred_mode_flag) {
-        int scaling_list_pred_matrix_id_delta = get_uvlc(br);
+        uint32_t scaling_list_pred_matrix_id_delta = get_uvlc(br);
 
         if (scaling_list_pred_matrix_id_delta == UVLC_ERROR) {
           return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
@@ -910,7 +892,7 @@ de265_error read_scaling_list(bitreader* br, const seq_parameter_set* sps,
           scaling_list_pred_matrix_id_delta *= 3;
         }
 
-        if (scaling_list_pred_matrix_id_delta > matrixId) {
+        if (scaling_list_pred_matrix_id_delta > (uint32_t)matrixId) {
           return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
         }
 

@@ -54,9 +54,10 @@ void bitreader_refill(bitreader* br)
   br->nextbits_cnt = 64-shift;
 }
 
-int  get_bits(bitreader* br, int n)
+uint32_t get_bits(bitreader* br, int n)
 {
   if (n == 0) return 0;
+  assert(n<=32);
 
   if (br->nextbits_cnt < n) {
     bitreader_refill(br);
@@ -71,9 +72,10 @@ int  get_bits(bitreader* br, int n)
   return val;
 }
 
-int  get_bits_fast(bitreader* br, int n)
+uint32_t get_bits_fast(bitreader* br, int n)
 {
   if (n == 0) return 0;
+  assert(n<=32);
 
   assert(br->nextbits_cnt >= n);
 
@@ -86,9 +88,10 @@ int  get_bits_fast(bitreader* br, int n)
   return val;
 }
 
-int  peek_bits(bitreader* br, int n)
+uint32_t peek_bits(bitreader* br, int n)
 {
   if (n == 0) return 0;
+  assert(n<=32);
 
   if (br->nextbits_cnt < n) {
     bitreader_refill(br);
@@ -135,7 +138,7 @@ void prepare_for_CABAC(bitreader* br)
   br->nextbits_cnt = 0;
 }
 
-int  get_uvlc(bitreader* br)
+uint32_t get_uvlc(bitreader* br)
 {
   int num_zeros=0;
 
@@ -145,10 +148,9 @@ int  get_uvlc(bitreader* br)
     if (num_zeros > MAX_UVLC_LEADING_ZEROS) { return UVLC_ERROR; }
   }
 
-  int offset = 0;
   if (num_zeros != 0) {
-    offset = get_bits(br, num_zeros);
-    int value = offset + (1<<num_zeros)-1;
+    uint32_t offset = get_bits(br, num_zeros);
+    uint32_t value = offset + (((uint32_t)1)<<num_zeros)-1;
     assert(value>0);
     return value;
   } else {
@@ -156,20 +158,21 @@ int  get_uvlc(bitreader* br)
   }
 }
 
-int  get_svlc(bitreader* br)
+int32_t get_svlc(bitreader* br)
 {
-  int v = get_uvlc(br);
-  if (v==0) return v;
-  if (v==UVLC_ERROR) return UVLC_ERROR;
+  uint32_t v = get_uvlc(br);
+  if (v==0) return 0;
+  if (v==UVLC_ERROR) return SVLC_ERROR;
 
   bool negative = ((v&1)==0);
-  return negative ? -v/2 : (v+1)/2;
+  return negative ? -(int32_t)(v/2) : (int32_t)((v+1)/2);
 }
 
 bool check_rbsp_trailing_bits(bitreader* br)
 {
   int stop_bit = get_bits(br,1);
   assert(stop_bit==1);
+  (void)stop_bit;
 
   while (br->nextbits_cnt>0 || br->bytes_remaining>0) {
     int filler = get_bits(br,1);

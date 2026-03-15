@@ -204,14 +204,15 @@ int  decode_CABAC_bit(CABAC_decoder* decoder, context_model* model)
 
       decoder->value = (decoder->value - scaled_range);
 
-      int num_bits = renorm_table[ LPS >> 3 ];
+      uint8_t num_bits = renorm_table[ LPS >> 3 ];
       decoder->value <<= num_bits;
       decoder->range   = LPS << num_bits;  /* this is always >= 0x100 except for state 63,
                                               but state 63 is never used */
 
+#ifndef NDEBUG
       int num_bitsTab = renorm_table[ LPS >> 3 ];
-
       assert(num_bits == num_bitsTab);
+#endif
 
       decoded_bit      = 1 - model->MPSbit;
 
@@ -421,8 +422,6 @@ int  decode_CABAC_TR_bypass(CABAC_decoder* decoder, int cRiceParam, int cTRMax)
 }
 
 
-#define MAX_PREFIX 32
-
 int  decode_CABAC_EGk_bypass(CABAC_decoder* decoder, int k)
 {
   int base=0;
@@ -434,12 +433,11 @@ int  decode_CABAC_EGk_bypass(CABAC_decoder* decoder, int k)
       if (bit==0)
         break;
       else {
-        base += 1<<n;
+        if (n >= 31) {
+          return 0; // TODO: error
+        }
+        base += 1u<<n;
         n++;
-      }
-
-      if (n == k+MAX_PREFIX) {
-        return 0; // TODO: error
       }
     }
 
@@ -461,13 +459,6 @@ void CABAC_encoder::add_trailing_bits()
 
 CABAC_encoder_bitstream::CABAC_encoder_bitstream()
 {
-  data_mem = NULL;
-  data_capacity = 0;
-  data_size = 0;
-  state = 0;
-
-  vlc_buffer_len = 0;
-
   init_CABAC();
 }
 

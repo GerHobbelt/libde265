@@ -176,6 +176,8 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
     return "Chroma format of reference image does not match current image";
   case DE265_WARNING_INVALID_SLICE_HEADER_INDEX_ACCESS:
     return "Access with invalid slice header index";
+  case DE265_WARNING_INVALID_TU_BLOCK_SPLIT:
+    return "Transform block split below minimum transform size";
 
   default: return "unknown error";
   }
@@ -325,6 +327,7 @@ LIBDE265_API de265_error de265_decode_data(de265_decoder_context* de265ctx,
 }
 #endif
 
+#if 0
 static void dumpdata(const void* data, int len)
 {
   for (int i=0;i<len;i++) {
@@ -332,6 +335,7 @@ static void dumpdata(const void* data, int len)
   }
   printf("\n");
 }
+#endif
 
 
 LIBDE265_API de265_error de265_push_data(de265_decoder_context* de265ctx,

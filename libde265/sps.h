@@ -68,15 +68,15 @@ class sps_range_extension
  public:
   sps_range_extension();
 
-  uint8_t transform_skip_rotation_enabled_flag;
-  uint8_t transform_skip_context_enabled_flag;
-  uint8_t implicit_rdpcm_enabled_flag;
-  uint8_t explicit_rdpcm_enabled_flag;
-  uint8_t extended_precision_processing_flag;
-  uint8_t intra_smoothing_disabled_flag;
-  uint8_t high_precision_offsets_enabled_flag;
-  uint8_t persistent_rice_adaptation_enabled_flag;
-  uint8_t cabac_bypass_alignment_enabled_flag;
+  uint8_t transform_skip_rotation_enabled_flag = 0;
+  uint8_t transform_skip_context_enabled_flag = 0;
+  uint8_t implicit_rdpcm_enabled_flag = 0;
+  uint8_t explicit_rdpcm_enabled_flag = 0;
+  uint8_t extended_precision_processing_flag = 0;
+  uint8_t intra_smoothing_disabled_flag = 0;
+  uint8_t high_precision_offsets_enabled_flag = 0;
+  uint8_t persistent_rice_adaptation_enabled_flag = 0;
+  uint8_t cabac_bypass_alignment_enabled_flag = 0;
 
   de265_error read(error_queue*, bitreader*);
   void dump(int fd) const;
@@ -98,7 +98,7 @@ public:
   void set_TB_log2size_range(int mini,int maxi);
   void set_resolution(int w,int h);
 
-  bool sps_read; // whether the sps has been read from the bitstream
+  bool sps_read = false; // whether the sps has been read from the bitstream
 
 
   char video_parameter_set_id;
@@ -107,8 +107,8 @@ public:
 
   profile_tier_level profile_tier_level_;
 
-  int seq_parameter_set_id;
-  int chroma_format_idc;
+  uint8_t seq_parameter_set_id;       // [0;15]
+  uint8_t chroma_format_idc;          // [0;3]
 
   char separate_colour_plane_flag;
   int  pic_width_in_luma_samples;
@@ -120,22 +120,22 @@ public:
   int conf_win_top_offset;
   int conf_win_bottom_offset;
 
-  int bit_depth_luma;
-  int bit_depth_chroma;
+  uint8_t bit_depth_luma;              // [8;16]
+  uint8_t bit_depth_chroma;            // [8;16]
 
-  int  log2_max_pic_order_cnt_lsb;
+  uint8_t log2_max_pic_order_cnt_lsb; // [4;16]
   char sps_sub_layer_ordering_info_present_flag;
 
-  int sps_max_dec_pic_buffering[7]; // for each temporal layer
-  int sps_max_num_reorder_pics[7];
-  int sps_max_latency_increase_plus1[7];
+  uint8_t sps_max_dec_pic_buffering[7]; // for each temporal layer
+  uint8_t sps_max_num_reorder_pics[7];
+  uint32_t sps_max_latency_increase_plus1[7];
 
-  int  log2_min_luma_coding_block_size;             // smallest CB size [3;6]
-  int  log2_diff_max_min_luma_coding_block_size;    // largest  CB size
-  int  log2_min_transform_block_size;               // smallest TB size [2;5]
-  int  log2_diff_max_min_transform_block_size;      // largest  TB size
-  int  max_transform_hierarchy_depth_inter;
-  int  max_transform_hierarchy_depth_intra;
+  uint8_t log2_min_luma_coding_block_size;             // smallest CB size [3;6]
+  uint8_t log2_diff_max_min_luma_coding_block_size;    // largest  CB size
+  uint8_t log2_min_transform_block_size;               // smallest TB size [2;5]
+  uint8_t log2_diff_max_min_transform_block_size;      // largest  TB size
+  uint8_t max_transform_hierarchy_depth_inter;
+  uint8_t max_transform_hierarchy_depth_intra;
 
   char scaling_list_enable_flag;
   char sps_scaling_list_data_present_flag; /* if not set, the default scaling lists will be set
@@ -158,7 +158,7 @@ public:
 
   char long_term_ref_pics_present_flag;
 
-  int num_long_term_ref_pics_sps;
+  uint8_t num_long_term_ref_pics_sps; // [0;32]
 
   int  lt_ref_pic_poc_lsb_sps[MAX_NUM_LT_REF_PICS_SPS];
   char used_by_curr_pic_lt_sps_flag[MAX_NUM_LT_REF_PICS_SPS];
@@ -200,16 +200,16 @@ public:
 
   int MaxPicOrderCntLsb;
 
-  int Log2MinCbSizeY;
-  int Log2CtbSizeY;
-  int MinCbSizeY;
-  int CtbSizeY;
-  int PicWidthInMinCbsY;
-  int PicWidthInCtbsY;
-  int PicHeightInMinCbsY;
-  int PicHeightInCtbsY;
-  int PicSizeInMinCbsY;
-  int PicSizeInCtbsY;
+  uint8_t Log2MinCbSizeY;
+  uint8_t Log2CtbSizeY;
+  uint8_t MinCbSizeY;
+  uint8_t CtbSizeY;
+  uint16_t PicWidthInMinCbsY;
+  uint16_t PicWidthInCtbsY;
+  uint16_t PicHeightInMinCbsY;
+  uint16_t PicHeightInCtbsY;
+  uint32_t PicSizeInMinCbsY;
+  uint32_t PicSizeInCtbsY;
   uint32_t PicSizeInSamplesY;
 
   int CtbWidthC, CtbHeightC;
