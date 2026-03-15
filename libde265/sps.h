@@ -129,6 +129,7 @@ public:
   uint8_t sps_max_dec_pic_buffering[7]; // for each temporal layer
   uint8_t sps_max_num_reorder_pics[7];
   uint32_t sps_max_latency_increase_plus1[7];
+  bool     sps_max_latency_increase_present[7] = {};
 
   uint8_t log2_min_luma_coding_block_size;             // smallest CB size [3;6]
   uint8_t log2_diff_max_min_luma_coding_block_size;    // largest  CB size
@@ -228,12 +229,12 @@ public:
   int Log2MinIpcmCbSizeY;
   int Log2MaxIpcmCbSizeY;
 
-  int SpsMaxLatencyPictures[7]; // [temporal layer]
+  int SpsMaxLatencyPictures[7] = {}; // [temporal layer]
 
   uint8_t WpOffsetBdShiftY;
   uint8_t WpOffsetBdShiftC;
-  int32_t WpOffsetHalfRangeY;
-  int32_t WpOffsetHalfRangeC;
+  uint16_t WpOffsetHalfRangeY;
+  uint16_t WpOffsetHalfRangeC;
 
 
   int getPUIndexRS(int pixelX,int pixelY) const {

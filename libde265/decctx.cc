@@ -467,7 +467,7 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
   // modify entry_point_offsets
 
-  int headerLength = reader.data - nal->data();
+  uint32_t headerLength = reader.data - nal->data();
   for (int i=0;i<shdr->num_entry_point_offsets;i++) {
     shdr->entry_point_offset[i] -= nal->num_skipped_bytes_before(shdr->entry_point_offset[i],
                                                                  headerLength);
@@ -629,7 +629,7 @@ de265_error decoder_context::decode_slice_unit_sequential(image_unit* imgunit,
   }
 
 
-  struct thread_context tctx;
+  thread_context tctx;
 
   tctx.shdr = sliceunit->shdr;
   tctx.img  = imgunit->img;
@@ -637,7 +637,7 @@ de265_error decoder_context::decode_slice_unit_sequential(image_unit* imgunit,
   tctx.imgunit = imgunit;
   tctx.sliceunit= sliceunit;
   tctx.CtbAddrInTS = imgunit->img->get_pps().CtbAddrRStoTS[tctx.shdr->slice_segment_address];
-  tctx.task = NULL;
+  tctx.task = nullptr;
 
   init_thread_context(&tctx);
 
@@ -1011,7 +1011,11 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
   bitreader_init(&reader, nal->data(), nal->size());
 
   nal_header nal_hdr;
-  nal_hdr.read(&reader);
+  err = nal_hdr.read(&reader);
+  if (err != DE265_OK) {
+    nal_parser.free_NAL_unit(nal);
+    return err;
+  }
   ctx->process_nal_hdr(&nal_hdr);
 
   if (nal_hdr.nuh_layer_id > 0) {
@@ -1363,8 +1367,12 @@ de265_error decoder_context::process_reference_picture_set(slice_segment_header*
 
         if (hdr->delta_poc_msb_present_flag[i]) {
           int currentPictureMSB = img->PicOrderCntVal - hdr->slice_pic_order_cnt_lsb;
+          if (DeltaPocMsbCycleLt[i] > static_cast<uint32_t>(INT32_MAX) / current_sps->MaxPicOrderCntLsb) {
+            add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+            return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+          }
           pocLt += currentPictureMSB
-            - DeltaPocMsbCycleLt[i] * current_sps->MaxPicOrderCntLsb;
+            - static_cast<int>(DeltaPocMsbCycleLt[i] * current_sps->MaxPicOrderCntLsb);
         }
 
         if (UsedByCurrPicLt[i]) {
@@ -1745,6 +1753,10 @@ void decoder_context::run_postprocessing_filters_parallel(image_unit* imgunit)
     waitForCompletion |= add_sao_tasks(imgunit, saoWaitsForProgress);
     //apply_sample_adaptive_offset(img);
   }
+
+  // The original intention was to skip wait_for_completion() if there is no SAO task,
+  // but it does not work as intended. (TODO: check why)
+  (void)waitForCompletion;
 
   img->wait_for_completion();
 }

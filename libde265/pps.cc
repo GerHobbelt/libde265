@@ -53,13 +53,9 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
   if (pps->transform_skip_enabled_flag) {
     uvlc = get_uvlc(br);
     if (uvlc == UVLC_ERROR ||
-        uvlc+2 > (uint32_t)sps->Log2MaxTrafoSize) {
-
-      // Note: this is out of spec, but the conformance stream
-      // PERSIST_RPARAM_A_RExt_Sony_2 codes a too large value.
-
-      //ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-      //return false;
+        uvlc > (uint32_t)sps->Log2MaxTrafoSize - 2) {
+      ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
     }
 
     log2_max_transform_skip_block_size = uvlc+2;
@@ -273,38 +269,38 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 
 
   uint32_t uvlc;
-  pic_parameter_set_id = uvlc = get_uvlc(br);
-  if (uvlc >= DE265_MAX_PPS_SETS ||
-      uvlc == UVLC_ERROR) {
+  uvlc = get_uvlc(br);
+  if (uvlc == UVLC_ERROR || uvlc >= DE265_MAX_PPS_SETS) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
     return false;
   }
+  pic_parameter_set_id = uvlc;
 
-  seq_parameter_set_id = uvlc = get_uvlc(br);
-  if (uvlc >= DE265_MAX_SPS_SETS ||
-      uvlc == UVLC_ERROR) {
+  uvlc = get_uvlc(br);
+  if (uvlc == UVLC_ERROR || uvlc >= DE265_MAX_SPS_SETS) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_SPS_REFERENCED, false);
     return false;
   }
+  seq_parameter_set_id = uvlc;
 
   dependent_slice_segments_enabled_flag = get_bits(br,1);
   output_flag_present_flag = get_bits(br,1);
   num_extra_slice_header_bits = get_bits(br,3);
   sign_data_hiding_flag = get_bits(br,1);
   cabac_init_present_flag = get_bits(br,1);
-  num_ref_idx_l0_default_active = uvlc = get_uvlc(br);
-  if (uvlc == UVLC_ERROR) {
+  uvlc = get_uvlc(br);
+  if (uvlc == UVLC_ERROR || uvlc > 15) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
-  num_ref_idx_l0_default_active++;
+  num_ref_idx_l0_default_active = uvlc + 1;
 
-  num_ref_idx_l1_default_active = uvlc = get_uvlc(br);
-  if (uvlc == UVLC_ERROR) {
+  uvlc = get_uvlc(br);
+  if (uvlc == UVLC_ERROR || uvlc > 15) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
-  num_ref_idx_l1_default_active++;
+  num_ref_idx_l1_default_active = uvlc + 1;
 
 
   if (!ctx->has_sps(seq_parameter_set_id)) {
@@ -328,7 +324,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
   cu_qp_delta_enabled_flag = get_bits(br,1);
 
   if (cu_qp_delta_enabled_flag) {
-    if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
+    if ((uvlc = get_uvlc(br)) == UVLC_ERROR || uvlc > 6) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
       return false;
     }
@@ -383,12 +379,13 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
     uniform_spacing_flag = get_bits(br,1);
 
     if (uniform_spacing_flag==false) {
-      int lastColumnWidth = sps->PicWidthInCtbsY;
-      int lastRowHeight   = sps->PicHeightInCtbsY;
+      uint16_t lastColumnWidth = sps->PicWidthInCtbsY;
+      uint16_t lastRowHeight   = sps->PicHeightInCtbsY;
 
       for (int i=0; i<num_tile_columns-1; i++)
         {
-          if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
+          if ((uvlc = get_uvlc(br)) == UVLC_ERROR ||
+              uvlc >= lastColumnWidth) {
 	    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
 	    return false;
 	  }
@@ -397,25 +394,18 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
           lastColumnWidth -= colWidth[i];
         }
 
-      if (lastColumnWidth <= 0) {
-        return false;
-      }
-
       colWidth[num_tile_columns-1] = lastColumnWidth;
 
       for (int i=0; i<num_tile_rows-1; i++)
         {
-          if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
+          if ((uvlc = get_uvlc(br)) == UVLC_ERROR ||
+              uvlc >= lastRowHeight) {
 	    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
 	    return false;
 	  }
           rowHeight[i] = uvlc+1;
           lastRowHeight -= rowHeight[i];
         }
-
-      if (lastRowHeight <= 0) {
-        return false;
-      }
 
 
       rowHeight[num_tile_rows-1] = lastRowHeight;
@@ -494,7 +484,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 
 
   lists_modification_present_flag = get_bits(br,1);
-  if ((uvlc = get_uvlc(br)) == UVLC_ERROR) {
+  if ((uvlc = get_uvlc(br)) == UVLC_ERROR || uvlc > 4) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }

@@ -129,15 +129,21 @@ de265_error video_parameter_set::read(error_queue* errqueue, bitreader* reader)
   int firstLayerRead = vps_sub_layer_ordering_info_present_flag ? 0 : (vps_max_sub_layers-1);
 
   for (int i=firstLayerRead;i<vps_max_sub_layers;i++) {
-    layer[i].vps_max_dec_pic_buffering = get_uvlc(reader);
-    layer[i].vps_max_num_reorder_pics  = get_uvlc(reader);
-    layer[i].vps_max_latency_increase  = get_uvlc(reader);
+    uint32_t v1 = get_uvlc(reader);
+    uint32_t v2 = get_uvlc(reader);
+    uint32_t v3 = get_uvlc(reader);
 
-if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
-    layer[i].vps_max_num_reorder_pics  == UVLC_ERROR ||
-    layer[i].vps_max_latency_increase  == UVLC_ERROR) {
+    if (v1 == UVLC_ERROR || v2 == UVLC_ERROR || v3 == UVLC_ERROR) {
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+
+    if (v1 > 16 || v2 > v1) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    layer[i].vps_max_dec_pic_buffering = v1;
+    layer[i].vps_max_num_reorder_pics  = v2;
+    layer[i].vps_max_latency_increase  = v3;
   }
 
   if (!vps_sub_layer_ordering_info_present_flag) {
@@ -152,14 +158,12 @@ if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
 
 
   vps_max_layer_id = get_bits(reader,6);
-  vps_num_layer_sets = get_uvlc(reader);
-
-  if (vps_num_layer_sets == UVLC_ERROR ||
-      vps_num_layer_sets+1>=1024) {
+  if ((vlc = get_uvlc(reader)) == UVLC_ERROR ||
+      vlc+1>=1024) {
     errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
-  vps_num_layer_sets += 1;
+  vps_num_layer_sets = vlc + 1;
 
   layer_id_included_flag.resize(vps_num_layer_sets);
 
@@ -181,19 +185,31 @@ if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
     vps_poc_proportional_to_timing_flag = get_bits(reader,1);
 
     if (vps_poc_proportional_to_timing_flag) {
-      vps_num_ticks_poc_diff_one = get_uvlc(reader)+1;
-      vps_num_hrd_parameters     = get_uvlc(reader);
-
-      if (vps_num_hrd_parameters >= 1024 || vps_num_hrd_parameters < 0) {
+      vlc = get_uvlc(reader);
+      if (vlc == UVLC_ERROR) {
         errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
         return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
+      vps_num_ticks_poc_diff_one = vlc + 1;
+
+      vlc = get_uvlc(reader);
+
+      if (vlc == UVLC_ERROR || vlc > vps_num_layer_sets) {
+        errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
+      vps_num_hrd_parameters = vlc;
 
       hrd_layer_set_idx .resize(vps_num_hrd_parameters);
       cprms_present_flag.resize(vps_num_hrd_parameters);
 
       for (int i=0; i<vps_num_hrd_parameters; i++) {
-        hrd_layer_set_idx[i] = get_uvlc(reader);
+        vlc = get_uvlc(reader);
+        if (vlc == UVLC_ERROR || vlc > 1023) {
+          errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+          return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+        }
+        hrd_layer_set_idx[i] = vlc;
 
         if (i > 0) {
           cprms_present_flag[i] = get_bits(reader,1);
@@ -252,8 +268,7 @@ de265_error video_parameter_set::write(error_queue* errqueue, CABAC_encoder& out
     out.write_uvlc(layer[i].vps_max_latency_increase);
   }
 
-  if (vps_num_layer_sets<0 ||
-      vps_num_layer_sets>=1024) {
+  if (vps_num_layer_sets>=1024) {
     errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }

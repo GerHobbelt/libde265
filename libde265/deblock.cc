@@ -532,45 +532,39 @@ void edge_filtering_luma_internal(de265_image* img, bool vertical,
 
         int dE=0, dEp=0, dEq=0;
 
-        if (vertical || !vertical) {
-          int dp0 = abs_value(p[0][2] - 2*p[0][1] + p[0][0]);
-          int dp3 = abs_value(p[3][2] - 2*p[3][1] + p[3][0]);
-          int dq0 = abs_value(q[0][2] - 2*q[0][1] + q[0][0]);
-          int dq3 = abs_value(q[3][2] - 2*q[3][1] + q[3][0]);
+        int dp0 = abs_value(p[0][2] - 2*p[0][1] + p[0][0]);
+        int dp3 = abs_value(p[3][2] - 2*p[3][1] + p[3][0]);
+        int dq0 = abs_value(q[0][2] - 2*q[0][1] + q[0][0]);
+        int dq3 = abs_value(q[3][2] - 2*q[3][1] + q[3][0]);
 
-          int dpq0 = dp0 + dq0;
-          int dpq3 = dp3 + dq3;
+        int dpq0 = dp0 + dq0;
+        int dpq3 = dp3 + dq3;
 
-          int dp = dp0 + dp3;
-          int dq = dq0 + dq3;
-          int d  = dpq0+ dpq3;
+        int dp = dp0 + dp3;
+        int dq = dq0 + dq3;
+        int d = dpq0 + dpq3;
 
-          if (d<beta) {
-            //int dpq = 2*dpq0;
-            bool dSam0 = (2*dpq0 < (beta>>2) &&
-                          abs_value(p[0][3]-p[0][0])+abs_value(q[0][0]-q[0][3]) < (beta>>3) &&
-                          abs_value(p[0][0]-q[0][0]) < ((5*tc+1)>>1));
+        if (d < beta) {
+          //int dpq = 2*dpq0;
+          bool dSam0 = (2 * dpq0 < (beta >> 2) &&
+                        abs_value(p[0][3]-p[0][0]) + abs_value(q[0][0]-q[0][3]) < (beta >> 3) &&
+                        abs_value(p[0][0]-q[0][0]) < ((5 * tc + 1) >> 1));
 
-            bool dSam3 = (2*dpq3 < (beta>>2) &&
-                          abs_value(p[3][3]-p[3][0])+abs_value(q[3][0]-q[3][3]) < (beta>>3) &&
-                          abs_value(p[3][0]-q[3][0]) < ((5*tc+1)>>1));
+          bool dSam3 = (2 * dpq3 < (beta >> 2) &&
+                        abs_value(p[3][3]-p[3][0]) + abs_value(q[3][0]-q[3][3]) < (beta >> 3) &&
+                        abs_value(p[3][0]-q[3][0]) < ((5 * tc + 1) >> 1));
 
-            if (dSam0 && dSam3) {
-              dE=2;
-            }
-            else {
-              dE=1;
-            }
-
-            if (dp < ((beta + (beta>>1))>>3)) { dEp=1; }
-            if (dq < ((beta + (beta>>1))>>3)) { dEq=1; }
-
-            logtrace(LogDeblock,"dE:%d dEp:%d dEq:%d\n",dE,dEp,dEq);
+          if (dSam0 && dSam3) {
+            dE = 2;
           }
-        }
-        else {
-          // TODO
-          assert(0);
+          else {
+            dE = 1;
+          }
+
+          if (dp < ((beta + (beta >> 1)) >> 3)) { dEp = 1; }
+          if (dq < ((beta + (beta >> 1)) >> 3)) { dEq = 1; }
+
+          logtrace(LogDeblock, "dE:%d dEp:%d dEq:%d\n", dE, dEp, dEq);
         }
 
 
@@ -1002,7 +996,6 @@ void add_deblocking_tasks(image_unit* imgunit)
 
   int nRows = img->get_sps().PicHeightInCtbsY;
 
-  int n=0;
   img->thread_start(nRows*2);
 
   for (int pass=0;pass<2;pass++)
@@ -1017,7 +1010,6 @@ void add_deblocking_tasks(image_unit* imgunit)
 
           imgunit->tasks.push_back(task);
           add_task(&ctx->thread_pool_, task);
-          n++;
         }
     }
 }

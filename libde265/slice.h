@@ -171,7 +171,7 @@ public:
   char    used_by_curr_pic_lt_flag[MAX_NUM_REF_PICS];
 
   char delta_poc_msb_present_flag[MAX_NUM_REF_PICS];
-  int delta_poc_msb_cycle_lt[MAX_NUM_REF_PICS];
+  uint32_t delta_poc_msb_cycle_lt[MAX_NUM_REF_PICS];
 
   char slice_temporal_mvp_enabled_flag;
   char slice_sao_luma_flag;
@@ -200,9 +200,9 @@ public:
   uint8_t luma_weight_flag[2][16];   // bool
   uint8_t chroma_weight_flag[2][16]; // bool
   int16_t LumaWeight[2][16];
-  int8_t  luma_offset[2][16];
+  int16_t luma_offset[2][16];
   int16_t ChromaWeight[2][16][2];
-  int8_t  ChromaOffset[2][16][2];
+  int16_t ChromaOffset[2][16][2];
 
 
   uint8_t five_minus_max_num_merge_cand; // [0;5]
@@ -222,7 +222,7 @@ public:
 
   int  num_entry_point_offsets;
   int  offset_len;
-  std::vector<int> entry_point_offset;
+  std::vector<uint32_t> entry_point_offset;
 
   int  slice_segment_header_extension_length;
 

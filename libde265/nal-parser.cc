@@ -91,13 +91,17 @@ bool LIBDE265_CHECK_RESULT NAL_unit::set_data(const unsigned char* in_data, int 
   return true;
 }
 
-void NAL_unit::insert_skipped_byte(int pos)
+void NAL_unit::insert_skipped_byte(uint32_t pos)
 {
   skipped_bytes.push_back(pos);
 }
 
-int NAL_unit::num_skipped_bytes_before(int byte_position, int headerLength) const
+uint32_t NAL_unit::num_skipped_bytes_before(uint32_t byte_position, uint32_t headerLength) const
 {
+  if (skipped_bytes.empty()) {
+    return 0;
+  }
+
   for (int k=skipped_bytes.size()-1;k>=0;k--)
     if (skipped_bytes[k] >= headerLength &&
         skipped_bytes[k]-headerLength <= byte_position) {

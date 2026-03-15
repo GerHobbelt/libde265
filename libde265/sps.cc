@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define D 0
+
 #define READ_VLC_OFFSET(variable, vlctype, offset)   \
   if ((vlc = get_ ## vlctype(br)) == UVLC_ERROR) {   \
     errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);  \
@@ -191,15 +193,19 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
 
   profile_tier_level_.read(br, sps_max_sub_layers);
 
-  READ_VLC(seq_parameter_set_id, uvlc);
-  if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc >= DE265_MAX_SPS_SETS) {
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  seq_parameter_set_id = vlc;
 
 
   // --- decode chroma type ---
 
-  READ_VLC(chroma_format_idc, uvlc);
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 3) {
+    errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  chroma_format_idc = vlc;
 
   if (chroma_format_idc == 3) {
     separate_colour_plane_flag = get_bits(br,1);
@@ -208,27 +214,18 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
     separate_colour_plane_flag = 0;
   }
 
-  if (chroma_format_idc<0 ||
-      chroma_format_idc>3) {
-    errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
-    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
-  }
-
 
   // --- picture size ---
 
-  READ_VLC(pic_width_in_luma_samples,  uvlc);
-  READ_VLC(pic_height_in_luma_samples, uvlc);
-
-  if (pic_width_in_luma_samples  == 0 ||
-      pic_height_in_luma_samples == 0) {
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc == 0 || vlc > MAX_PICTURE_WIDTH) {
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  pic_width_in_luma_samples = vlc;
 
-  if (pic_width_in_luma_samples > MAX_PICTURE_WIDTH ||
-      pic_height_in_luma_samples> MAX_PICTURE_HEIGHT) {
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc == 0 || vlc > MAX_PICTURE_HEIGHT) {
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  pic_height_in_luma_samples = vlc;
 
   conformance_window_flag = get_bits(br,1);
 
@@ -245,20 +242,23 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
     conf_win_bottom_offset= 0;
   }
 
-  READ_VLC_OFFSET(bit_depth_luma,  uvlc, 8);
-  READ_VLC_OFFSET(bit_depth_chroma,uvlc, 8);
-  if (bit_depth_luma > 16 ||
-      bit_depth_chroma > 16) {
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 8) {
     errqueue->add_warning(DE265_WARNING_SPS_HEADER_INVALID, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  bit_depth_luma = vlc + 8;
 
-  READ_VLC_OFFSET(log2_max_pic_order_cnt_lsb, uvlc, 4);
-  if (log2_max_pic_order_cnt_lsb<4 ||
-      log2_max_pic_order_cnt_lsb>16) {
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 8) {
     errqueue->add_warning(DE265_WARNING_SPS_HEADER_INVALID, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  bit_depth_chroma = vlc + 8;
+
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 12) {
+    errqueue->add_warning(DE265_WARNING_SPS_HEADER_INVALID, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  log2_max_pic_order_cnt_lsb = vlc + 4;
   MaxPicOrderCntLsb = 1<<(log2_max_pic_order_cnt_lsb);
 
 
@@ -284,15 +284,22 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
 
     // sps_max_num_reorder_pics[i]
 
-    READ_VLC(sps_max_num_reorder_pics[i], uvlc);
+    if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > sps_max_dec_pic_buffering[i]) {
+      errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    sps_max_num_reorder_pics[i] = vlc;
 
 
     // sps_max_latency_increase[i]
 
     READ_VLC(sps_max_latency_increase_plus1[i], uvlc);
 
-    SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
-                                sps_max_latency_increase_plus1[i]-1);
+    sps_max_latency_increase_present[i] = (sps_max_latency_increase_plus1[i] != 0);
+    if (sps_max_latency_increase_present[i]) {
+      SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
+                                  sps_max_latency_increase_plus1[i] - 1);
+    }
   }
 
   // copy info to all layers if only specified once
@@ -305,21 +312,56 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
       sps_max_dec_pic_buffering[i] = sps_max_dec_pic_buffering[ref];
       sps_max_num_reorder_pics[i]  = sps_max_num_reorder_pics[ref];
       sps_max_latency_increase_plus1[i]  = sps_max_latency_increase_plus1[ref];
+      sps_max_latency_increase_present[i] = sps_max_latency_increase_present[ref];
+      SpsMaxLatencyPictures[i] = SpsMaxLatencyPictures[ref];
     }
   }
 
 
-  READ_VLC_OFFSET(log2_min_luma_coding_block_size, uvlc, 3);
-  READ_VLC       (log2_diff_max_min_luma_coding_block_size, uvlc);
-  READ_VLC_OFFSET(log2_min_transform_block_size, uvlc, 2);
-  READ_VLC(log2_diff_max_min_transform_block_size, uvlc);
-  READ_VLC(max_transform_hierarchy_depth_inter, uvlc);
-  READ_VLC(max_transform_hierarchy_depth_intra, uvlc);
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 3) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  log2_min_luma_coding_block_size = vlc + 3;
 
-  if (log2_min_luma_coding_block_size > 6) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
-  if (log2_min_luma_coding_block_size + log2_diff_max_min_luma_coding_block_size > 6) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
-  if (log2_min_transform_block_size > 5) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
-  if (log2_min_transform_block_size + log2_diff_max_min_transform_block_size > 5) { return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; }
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > static_cast<uint32_t>(6 - log2_min_luma_coding_block_size)) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  log2_diff_max_min_luma_coding_block_size = vlc;
+
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > 3) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  log2_min_transform_block_size = vlc + 2;
+
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > static_cast<uint32_t>(5 - log2_min_transform_block_size)) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  log2_diff_max_min_transform_block_size = vlc;
+
+  // log2_min_transform_block_size must not exceed the max coding block size (Log2CtbSizeY)
+  if (log2_min_transform_block_size > log2_min_luma_coding_block_size + log2_diff_max_min_luma_coding_block_size) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+  uint32_t maxDepth = log2_min_luma_coding_block_size + log2_diff_max_min_luma_coding_block_size
+                    - log2_min_transform_block_size;
+
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > maxDepth) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  max_transform_hierarchy_depth_inter = vlc;
+
+  if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > maxDepth) {
+    errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+  max_transform_hierarchy_depth_intra = vlc;
 
   scaling_list_enable_flag = get_bits(br,1);
 
@@ -344,8 +386,20 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
   if (pcm_enabled_flag) {
     pcm_sample_bit_depth_luma = get_bits(br,4)+1;
     pcm_sample_bit_depth_chroma = get_bits(br,4)+1;
-    READ_VLC_OFFSET(log2_min_pcm_luma_coding_block_size, uvlc, 3);
-    READ_VLC(log2_diff_max_min_pcm_luma_coding_block_size, uvlc);
+    int log2PcmCbSizeMax = std::min(static_cast<int>(log2_min_luma_coding_block_size +
+                                                      log2_diff_max_min_luma_coding_block_size), 5);
+
+    if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc + 3 > static_cast<uint32_t>(log2PcmCbSizeMax)) {
+      errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    log2_min_pcm_luma_coding_block_size = vlc + 3;
+
+    if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > static_cast<uint32_t>(log2PcmCbSizeMax - log2_min_pcm_luma_coding_block_size)) {
+      errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    log2_diff_max_min_pcm_luma_coding_block_size = vlc;
     pcm_loop_filter_disable_flag = get_bits(br,1);
 
     if (pcm_sample_bit_depth_luma > bit_depth_luma) {
@@ -398,10 +452,10 @@ de265_error seq_parameter_set::read(error_queue* errqueue, bitreader* br)
 
   if (long_term_ref_pics_present_flag) {
 
-    READ_VLC(num_long_term_ref_pics_sps, uvlc);
-    if (num_long_term_ref_pics_sps > MAX_NUM_LT_REF_PICS_SPS) {
+    if ((vlc = get_uvlc(br)) == UVLC_ERROR || vlc > MAX_NUM_LT_REF_PICS_SPS) {
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+    num_long_term_ref_pics_sps = vlc;
 
     for (int i = 0; i < num_long_term_ref_pics_sps; i++ ) {
       lt_ref_pic_poc_lsb_sps[i] = get_bits(br, log2_max_pic_order_cnt_lsb);
@@ -515,7 +569,7 @@ de265_error seq_parameter_set::compute_derived_values(bool sanitize_values)
     if (sanitize_values) {
       max_transform_hierarchy_depth_inter = Log2CtbSizeY - Log2MinTrafoSize;
     } else {
-      fprintf(stderr,"SPS error: transform hierarchy depth (inter) > CTB size - min TB size\n");
+      if (D) fprintf(stderr,"SPS error: transform hierarchy depth (inter) > CTB size - min TB size\n");
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
   }
@@ -524,7 +578,7 @@ de265_error seq_parameter_set::compute_derived_values(bool sanitize_values)
     if (sanitize_values) {
       max_transform_hierarchy_depth_intra = Log2CtbSizeY - Log2MinTrafoSize;
     } else {
-      fprintf(stderr,"SPS error: transform hierarchy depth (intra) > CTB size - min TB size\n");
+      if (D) fprintf(stderr,"SPS error: transform hierarchy depth (intra) > CTB size - min TB size\n");
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
   }
@@ -574,28 +628,28 @@ de265_error seq_parameter_set::compute_derived_values(bool sanitize_values)
   if (pic_width_in_luma_samples  % MinCbSizeY != 0 ||
       pic_height_in_luma_samples % MinCbSizeY != 0) {
     // TODO: warn that image size is coded wrong in bitstream (must be multiple of MinCbSizeY)
-    fprintf(stderr,"SPS error: CB alignment\n");
+    if (D) fprintf(stderr,"SPS error: CB alignment\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MinTrafoSize > Log2MinCbSizeY) {
-    fprintf(stderr,"SPS error: TB > CB\n");
+    if (D) fprintf(stderr,"SPS error: TB > CB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (Log2MaxTrafoSize > libde265_min(Log2CtbSizeY,5)) {
-    fprintf(stderr,"SPS error: TB_max > 32 or CTB\n");
+    if (D) fprintf(stderr,"SPS error: TB_max > 32 or CTB\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
 
   if (BitDepth_Y < 8 || BitDepth_Y > 16) {
-    fprintf(stderr,"SPS error: bitdepth Y not in [8;16]\n");
+    if (D) fprintf(stderr,"SPS error: bitdepth Y not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
   if (BitDepth_C < 8 || BitDepth_C > 16) {
-    fprintf(stderr,"SPS error: bitdepth C not in [8;16]\n");
+    if (D) fprintf(stderr,"SPS error: bitdepth C not in [8;16]\n");
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
 
@@ -1073,8 +1127,7 @@ de265_error seq_parameter_set::write(error_queue* errqueue, CABAC_encoder& out)
 
   out.write_uvlc(chroma_format_idc);
 
-  if (chroma_format_idc<0 ||
-      chroma_format_idc>3) {
+  if (chroma_format_idc>3) {
     errqueue->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }

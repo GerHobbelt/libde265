@@ -146,10 +146,9 @@ void decode_quantization_parameters(thread_context* tctx, int xC,int yC,
   int QPY = ((qPY_PRED + tctx->CuQpDelta + 52+2*sps.QpBdOffset_Y) %
              (52 + sps.QpBdOffset_Y)) - sps.QpBdOffset_Y;
 
+  assert(QPY >= -sps.QpBdOffset_Y && QPY <= 51);
+
   tctx->qPYPrime = QPY + sps.QpBdOffset_Y;
-  if (tctx->qPYPrime<0) {
-    tctx->qPYPrime=0;
-  }
 
   int qPiCb = Clip3(-sps.QpBdOffset_C,57, QPY+pps.pic_cb_qp_offset + shdr->slice_cb_qp_offset + tctx->CuQpOffsetCb);
   int qPiCr = Clip3(-sps.QpBdOffset_C,57, QPY+pps.pic_cr_qp_offset + shdr->slice_cr_qp_offset + tctx->CuQpOffsetCr);
@@ -256,7 +255,7 @@ void cross_comp_pred(const thread_context* tctx, int32_t* residual, int nT)
       */
 
       residual[y*nT+x] += (tctx->ResScaleVal *
-                           ((tctx->residual_luma[y*nT+x] << BitDepthC ) >> BitDepthY ) ) >> 3;
+                           static_cast<int32_t>((static_cast<uint32_t>(tctx->residual_luma[y*nT+x]) << BitDepthC ) >> BitDepthY ) ) >> 3;
     }
 }
 
@@ -688,7 +687,6 @@ void quant_coefficients(//encoder_context* ectx,
   int rnd = (intra ? 171 : 85) << (qBits-9);
 
   int x, y;
-  int uiAcSum = 0;
 
   int nStride = (1<<log2TrSize);
 
@@ -702,7 +700,6 @@ void quant_coefficients(//encoder_context* ectx,
       sign   = (level < 0 ? -1: 1);
 
       level = (abs_value(level) * uiQ + rnd ) >> qBits;
-      uiAcSum += level;
       level *= sign;
       out_coeff[blockPos] = Clip3(-32768, 32767, level);
       //logtrace(LogTransform,"%d\n", out_coeff[blockPos]);

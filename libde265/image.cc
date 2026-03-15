@@ -67,8 +67,6 @@ static inline void *ALLOC_ALIGNED(size_t alignment, size_t size) {
 
 #define ALLOC_ALIGNED_16(size)              ALLOC_ALIGNED(16, size)
 
-static const int alignment = 16;
-
 LIBDE265_API void* de265_alloc_image_plane(struct de265_image* img, int cIdx,
                                            void* inputdata, int inputstride, void *userdata)
 {
@@ -191,7 +189,7 @@ void de265_image::set_image_plane(int cIdx, uint8_t* mem, int stride, void *user
 
 de265_image::de265_image()
 {
-  ID = -1;
+  ID = std::numeric_limits<uint32_t>::max();
   removed_at_picture_id = 0; // picture not used, so we can assume it has been removed
 
   decctx = NULL;
@@ -454,8 +452,9 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
 
     // CTB info
 
-    if (ctb_info.width_in_units != sps->PicWidthInCtbsY ||
-        ctb_info.height_in_units != sps->PicHeightInCtbsY)
+    if (ctb_info.width_in_units  != sps->PicWidthInCtbsY  ||
+        ctb_info.height_in_units != sps->PicHeightInCtbsY ||
+        ctb_info.log2unitSize    != sps->Log2CtbSizeY)
       {
         delete[] ctb_progress;
 
