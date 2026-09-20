@@ -76,14 +76,14 @@ thread_context::thread_context()
 
 
 slice_unit::slice_unit(decoder_context* decctx)
-  : nal(NULL),
-    shdr(NULL),
-    imgunit(NULL),
+  : nal(nullptr),
+    shdr(nullptr),
+    imgunit(nullptr),
     flush_reorder_buffer(false),
     nThreads(0),
     first_decoded_CTB_RS(-1),
     last_decoded_CTB_RS(-1),
-    thread_contexts(NULL),
+    thread_contexts(nullptr),
     ctx(decctx)
 {
   state = Unprocessed;
@@ -102,7 +102,7 @@ slice_unit::~slice_unit()
 
 void slice_unit::allocate_thread_contexts(int n)
 {
-  assert(thread_contexts==NULL);
+  assert(thread_contexts==nullptr);
 
   thread_contexts = new thread_context[n];
   nThreadContexts = n;
@@ -157,7 +157,7 @@ void decoder_context::set_image_allocation_functions(de265_image_allocation* all
     assert(false); // actually, it makes no sense to reset the allocation functions
 
     param_image_allocation_functions = de265_image::default_image_allocation;
-    param_image_allocation_userdata  = NULL;
+    param_image_allocation_userdata  = nullptr;
   }
 }
 
@@ -199,7 +199,7 @@ void decoder_context::reset()
   IdrPicFlag = 0;
   RapPicFlag = 0;
 
-  img = NULL;
+  img = nullptr;
 
 
   // TODO: remove all pending image_units
@@ -213,7 +213,7 @@ void decoder_context::reset()
 
   // --- remove all pictures from output queue ---
 
-  // there was a bug the peek_next_image did not return NULL on empty output queues.
+  // there was a bug the peek_next_image did not return nullptr on empty output queues.
   // This was (indirectly) fixed by recreating the DPB buffer, but it should actually
   // be sufficient to clear it like this.
   // The error showed while scrubbing the ToS video in VLC.
@@ -453,25 +453,32 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
   if (process_slice_segment_header(shdr, &err, nal->pts, &nal_hdr, nal->user_data) == false)
     {
-      if (img!=NULL) img->integrity = INTEGRITY_NOT_DECODED;
+      if (img!=nullptr) img->integrity = INTEGRITY_NOT_DECODED;
       nal_parser.free_NAL_unit(nal);
       delete shdr;
       return err;
     }
 
-  this->img->add_slice_segment_header(shdr);
-
-  skip_bits(&reader,1); // TODO: why?
-  prepare_for_CABAC(&reader);
+  reader.skip_bits(1); // TODO: why?
+  reader.prepare_for_CABAC();
 
 
   // modify entry_point_offsets
 
   uint32_t headerLength = reader.data - nal->data();
   for (int i=0;i<shdr->num_entry_point_offsets;i++) {
-    shdr->entry_point_offset[i] -= nal->num_skipped_bytes_before(shdr->entry_point_offset[i],
-                                                                 headerLength);
+    uint32_t skipped = nal->num_skipped_bytes_before(shdr->entry_point_offset[i],
+                                                     headerLength);
+    if (skipped > shdr->entry_point_offset[i]) {
+      add_warning(DE265_WARNING_SLICEHEADER_INVALID, false);
+      nal_parser.free_NAL_unit(nal);
+      delete shdr;
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    shdr->entry_point_offset[i] -= skipped;
   }
+
+  this->img->add_slice_segment_header(shdr);
 
 
 
@@ -534,7 +541,7 @@ de265_error decoder_context::decode_some(bool* did_work)
     image_unit* imgunit = image_units[0];
     slice_unit* sliceunit = imgunit->get_next_unprocessed_slice_segment();
 
-    if (sliceunit != NULL) {
+    if (sliceunit != nullptr) {
 
       //pop_front(imgunit->slice_units);
 
@@ -1007,8 +1014,7 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
 
   de265_error err = DE265_OK;
 
-  bitreader reader;
-  bitreader_init(&reader, nal->data(), nal->size());
+  bitreader reader(nal->data(), nal->size());
 
   nal_header nal_hdr;
   err = nal_hdr.read(&reader);
@@ -1615,12 +1621,17 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
   for (rIdx=0; rIdx<hdr->num_ref_idx_l0_active; rIdx++) {
     int idx = hdr->ref_pic_list_modification_flag_l0 ? hdr->list_entry_l0[rIdx] : rIdx;
 
+    if (idx >= NumRpsCurrTempList0) {
+      add_warning(DE265_WARNING_FAULTY_REFERENCE_PICTURE_LIST, false);
+      return false;
+    }
+
     hdr->RefPicList[0][rIdx] = RefPicListTemp0[idx];
     hdr->LongTermRefPic[0][rIdx] = isLongTerm[0][idx];
 
     // remember POC of referenced image (needed in motion.c, derive_collocated_motion_vector)
     de265_image* img_0_rIdx = dpb.get_image(hdr->RefPicList[0][rIdx]);
-    if (img_0_rIdx==NULL) {
+    if (img_0_rIdx==nullptr) {
       return false;
     }
     hdr->RefPicList_POC[0][rIdx] = img_0_rIdx->PicOrderCntVal;
@@ -1668,12 +1679,17 @@ bool decoder_context::construct_reference_picture_lists(slice_segment_header* hd
     for (rIdx=0; rIdx<hdr->num_ref_idx_l1_active; rIdx++) {
       int idx = hdr->ref_pic_list_modification_flag_l1 ? hdr->list_entry_l1[rIdx] : rIdx;
 
+      if (idx >= NumRpsCurrTempList1) {
+        add_warning(DE265_WARNING_FAULTY_REFERENCE_PICTURE_LIST, false);
+        return false;
+      }
+
       hdr->RefPicList[1][rIdx] = RefPicListTemp1[idx];
       hdr->LongTermRefPic[1][rIdx] = isLongTerm[1][idx];
 
       // remember POC of referenced imaged (needed in motion.c, derive_collocated_motion_vector)
       de265_image* img_1_rIdx = dpb.get_image(hdr->RefPicList[1][rIdx]);
-      if (img_1_rIdx == NULL) { return false; }
+      if (img_1_rIdx == nullptr) { return false; }
       hdr->RefPicList_POC[1][rIdx] = img_1_rIdx->PicOrderCntVal;
       hdr->RefPicList_PicState[1][rIdx] = img_1_rIdx->PicState;
     }
@@ -1772,7 +1788,7 @@ de265_error decoder_context::push_picture_to_output_queue(image_unit* imgunit)
 {
   de265_image* outimg = imgunit->img;
 
-  if (outimg==NULL) { return DE265_OK; }
+  if (outimg==nullptr) { return DE265_OK; }
 
 
   // push image into output queue
@@ -1927,7 +1943,7 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
   else {
     // claims to be not the first slice, but there is no active image available
 
-    if (img == NULL) {
+    if (img == nullptr) {
       return false;
     }
   }
@@ -2000,7 +2016,7 @@ void decoder_context::set_limit_TID(int max_tid)
 
 int decoder_context::change_framerate(int more)
 {
-  if (current_sps == NULL) { return framerate_ratio; }
+  if (current_sps == nullptr) { return framerate_ratio; }
 
   int highestTid = get_highest_TID();
 
